@@ -1,0 +1,50 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-background text-slate-100 antialiased;
+}
+
+.card {
+  @apply rounded-2xl border border-border bg-gradient-to-b from-background-soft/80 to-black/60 shadow-elevated;
+}
+
+.card-inner {
+  @apply rounded-[1.25rem] bg-gradient-to-br from-white/5 via-white/0 to-primary/10;
+}
+
+.btn-primary {
+  @apply inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground shadow-lg shadow-primary/40 transition hover:-translate-y-0.5 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+.btn-outline {
+  @apply inline-flex items-center gap-2 rounded-full border border-slate-700/80 bg-slate-900/40 px-4 py-2 text-sm font-medium text-slate-100 shadow-sm transition hover:-translate-y-0.5 hover:border-primary hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-up {
+  animation: fadeUp 600ms ease-out both;
+}
+
+.fade-up-delay-1 {
+  animation-delay: 120ms;
+}
+
+.fade-up-delay-2 {
+  animation-delay: 220ms;
+}
