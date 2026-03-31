@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@farcaster/mini-app-solana": "^1.1.3",
     "@fatsolutions/tongo-sdk": "^1.3.2",
     "@hyperlane-xyz/registry": "^24.2.0",
     "@hyperlane-xyz/sdk": "^29.1.0",
