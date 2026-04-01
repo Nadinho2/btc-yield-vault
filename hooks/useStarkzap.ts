@@ -53,6 +53,27 @@ type StarkZapEmbeddedWalletApi = {
   };
 };
 
+async function waitForStarknetWallet(
+  refreshUser: () => Promise<{ linkedAccounts?: unknown[] } | null | undefined>,
+  maxAttempts = 8,
+  delayMs = 1500
+) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const freshUser = await refreshUser();
+    const creds = extractStarknetPrivyWallet(freshUser);
+    console.log("[useStarkzap] waitForStarknetWallet attempt", attempt, {
+      hasUser: !!freshUser,
+      linkedAccountsCount: freshUser?.linkedAccounts?.length ?? 0,
+      walletFound: !!creds
+    });
+    if (creds) return creds;
+    if (attempt < maxAttempts) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
+}
+
 /**
  * Find a Starknet embedded wallet (Privy Tier 2) on the user.
  * Same linked-account shape for Google and email login once authenticated.
@@ -212,22 +233,24 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
           if (typeof maybeEmbeddedWalletCreator === "function") {
             const embeddedResult = await maybeEmbeddedWalletCreator({ chain: "starknet" });
             console.log("[useStarkzap] sdk.wallet.createEmbeddedWallet result", embeddedResult);
-            const fresh = await refreshUser();
-            userAfterCreate = fresh ?? currentUser;
+            const maybeFresh = await refreshUser();
+            userAfterCreate = maybeFresh ?? currentUser;
           } else {
             const created = await createExtendedChainWallet({ chainType: "starknet" });
             userAfterCreate = created.user ?? currentUser;
             apiWallet = created.wallet ?? null;
             console.log("[useStarkzap] createExtendedChainWallet result", created);
           }
-          creds =
-            extractStarknetPrivyWallet(userAfterCreate) ?? credsFromPrivyApiWallet(apiWallet);
+          creds = extractStarknetPrivyWallet(userAfterCreate) ?? credsFromPrivyApiWallet(apiWallet);
+          if (!creds) {
+            setWalletStatusText("Creating your Starknet wallet... (this may take 10-20 seconds)");
+            creds = await waitForStarknetWallet(refreshUser);
+          }
         } catch (e) {
           attemptedStarknetCreateRef.current = false;
           const msg = e instanceof Error ? e.message : String(e);
           if (/already|exist|duplicate/i.test(msg)) {
-            const fresh = await refreshUser();
-            creds = extractStarknetPrivyWallet(fresh);
+            creds = await waitForStarknetWallet(refreshUser);
           } else {
             throw e;
           }
@@ -235,8 +258,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
       }
 
       if (!creds) {
-        const fresh = await refreshUser();
-        creds = extractStarknetPrivyWallet(fresh);
+        creds = await waitForStarknetWallet(refreshUser, 4, 1000);
       }
 
       if (!creds) {
