@@ -49,7 +49,7 @@ type LinkedWalletLike = {
 
 type StarkZapEmbeddedWalletApi = {
   wallet?: {
-    createEmbeddedWallet?: (args: { chain: "starknet" }) => Promise<unknown>;
+    createEmbeddedWallet?: (args: { chain: "starknet"; paymaster: null }) => Promise<unknown>;
   };
 };
 
@@ -208,7 +208,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
 
     connectingRef.current = true;
     setWalletLoading(true);
-    setWalletStatusText("Creating your Starknet wallet... (this may take 10-20 seconds)");
+    setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
     setWalletError(null);
 
     try {
@@ -217,11 +217,10 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
 
       if (!creds && !attemptedStarknetCreateRef.current) {
         attemptedStarknetCreateRef.current = true;
-        setWalletStatusText("Creating your Starknet wallet... (this may take 10-20 seconds)");
+        setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
         try {
-          const maybeEmbeddedWalletCreator = (
-            sdk as unknown as StarkZapEmbeddedWalletApi
-          ).wallet?.createEmbeddedWallet;
+          const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
+          const maybeEmbeddedWalletCreator = sdkWalletApi.wallet?.createEmbeddedWallet;
           let apiWallet: {
             id: string;
             chain_type?: string;
@@ -231,8 +230,12 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
           } | null = null;
           let userAfterCreate = currentUser;
           if (typeof maybeEmbeddedWalletCreator === "function") {
-            const embeddedResult = await maybeEmbeddedWalletCreator({ chain: "starknet" });
-            console.log("[useStarkzap] sdk.wallet.createEmbeddedWallet result", embeddedResult);
+            // Disable paymaster only for initial embedded wallet creation.
+            const wallet = await sdkWalletApi.wallet!.createEmbeddedWallet({
+              chain: "starknet",
+              paymaster: null
+            });
+            console.log("[useStarkzap] sdk.wallet.createEmbeddedWallet result", wallet);
             const maybeFresh = await refreshUser();
             userAfterCreate = maybeFresh ?? currentUser;
           } else {
@@ -243,7 +246,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
           }
           creds = extractStarknetPrivyWallet(userAfterCreate) ?? credsFromPrivyApiWallet(apiWallet);
           if (!creds) {
-            setWalletStatusText("Creating your Starknet wallet... (this may take 10-20 seconds)");
+            setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
             creds = await waitForStarknetWallet(refreshUser);
           }
         } catch (e) {
