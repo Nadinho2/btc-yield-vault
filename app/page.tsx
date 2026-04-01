@@ -28,7 +28,8 @@ export default function HomePage() {
     walletLoading,
     walletStatusText,
     walletError,
-    wallet
+    wallet,
+    connectStarkWallet
   } = useStarkzapWallet();
   const { ready, authenticated, login, logout } = usePrivy();
   const [privateMode, setPrivateMode] = useState(true);
@@ -143,9 +144,18 @@ export default function HomePage() {
           )}
 
           {authenticated && walletError && !walletLoading && (
-            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 sm:max-w-md">
-              {walletError}
-            </p>
+            <div className="flex flex-col gap-2 sm:max-w-md">
+              <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+                {walletError}
+              </p>
+              <button
+                type="button"
+                onClick={() => void connectStarkWallet()}
+                className="inline-flex items-center justify-center rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-500/20"
+              >
+                Retry
+              </button>
+            </div>
           )}
 
           {walletReady && walletAddress && (
