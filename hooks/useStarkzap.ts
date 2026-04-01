@@ -7,15 +7,23 @@ import { OnboardStrategy, StarkZap } from "starkzap";
 import type { WalletInterface } from "starkzap";
 
 const PRIVY_API_BASE = "https://api.privy.io/v1";
+const CARTRIDGE_PAYMASTER_NODE_URL =
+  process.env.NEXT_PUBLIC_CARTRIDGE_PAYMASTER_NODE_URL?.trim() ||
+  "https://api.cartridge.gg/x/starknet/sepolia";
 
 let singletonSdk: StarkZap | null = null;
 
 function getStarkzap(): StarkZap {
   if (!singletonSdk) {
-    singletonSdk = new StarkZap({
+    const sdkConfig: any = {
       network: "sepolia",
-      gasless: true
-    } as any);
+      gasless: true,
+      paymaster: {
+        nodeUrl: CARTRIDGE_PAYMASTER_NODE_URL
+      }
+    };
+
+    singletonSdk = new StarkZap(sdkConfig);
   }
   return singletonSdk;
 }

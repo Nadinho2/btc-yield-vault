@@ -117,6 +117,7 @@ export default function HomePage() {
             <span className="text-xs text-slate-400">
               Gasless yield on Bitcoin, powered by Starknet
             </span>
+            <span className="text-[11px] text-slate-500">Gasless powered by Cartridge</span>
           </div>
         </div>
 
