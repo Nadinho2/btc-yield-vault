@@ -45,14 +45,14 @@ type StarkZapEmbeddedWalletApi = {
 };
 
 type LinkedWalletLike = {
-  address?: string;
+  address?: string | null;
   type?: string;
-  chainType?: string;
-  chain_type?: string;
-  id?: string;
-  wallet_id?: string;
-  public_key?: string;
-  publicKey?: string;
+  chainType?: string | null;
+  chain_type?: string | null;
+  id?: string | null;
+  wallet_id?: string | null;
+  public_key?: string | null;
+  publicKey?: string | null;
 };
 
 type PrivyUserLike = {
