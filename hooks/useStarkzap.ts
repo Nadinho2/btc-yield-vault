@@ -37,7 +37,15 @@ export function useStarkzap(): StarkZap {
   return useMemo(() => getStarkzap(), []);
 }
 
+type StarkZapEmbeddedWalletApi = {
+  wallet?: {
+    createEmbeddedWallet?: (args: { chain: "starknet"; paymaster: null }) => Promise<unknown>;
+    setPaymaster?: (args: { nodeUrl: string }) => void;
+  };
+};
+
 type LinkedWalletLike = {
+  address?: string;
   type?: string;
   chainType?: string;
   chain_type?: string;
@@ -47,38 +55,22 @@ type LinkedWalletLike = {
   publicKey?: string;
 };
 
-type StarkZapEmbeddedWalletApi = {
-  wallet?: {
-    createEmbeddedWallet?: (args: { chain: "starknet"; paymaster: null }) => Promise<unknown>;
-  };
+type PrivyUserLike = {
+  linkedAccounts?: unknown[];
+  wallet?: LinkedWalletLike;
 };
 
-async function waitForStarknetWallet(
-  refreshUser: () => Promise<{ linkedAccounts?: unknown[] } | null | undefined>,
-  maxAttempts = 8,
-  delayMs = 1500
-) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const freshUser = await refreshUser();
-    const creds = extractStarknetPrivyWallet(freshUser);
-    console.log("[useStarkzap] waitForStarknetWallet attempt", attempt, {
-      hasUser: !!freshUser,
-      linkedAccountsCount: freshUser?.linkedAccounts?.length ?? 0,
-      walletFound: !!creds
-    });
-    if (creds) return creds;
-    if (attempt < maxAttempts) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+function extractStarknetPrivyWallet(user: PrivyUserLike | null | undefined) {
+  const directWallet = user?.wallet;
+  if (directWallet && typeof directWallet === "object") {
+    const chain = String(directWallet.chainType ?? directWallet.chain_type ?? "").toLowerCase();
+    const walletId = directWallet.id ?? directWallet.wallet_id;
+    const publicKey = directWallet.public_key ?? directWallet.publicKey;
+    if (chain === "starknet" && typeof walletId === "string" && typeof publicKey === "string") {
+      return { walletId, publicKey };
     }
   }
-  return null;
-}
 
-/**
- * Find a Starknet embedded wallet (Privy Tier 2) on the user.
- * Same linked-account shape for Google and email login once authenticated.
- */
-export function extractStarknetPrivyWallet(user: { linkedAccounts?: unknown[] } | null | undefined) {
   const accounts = user?.linkedAccounts ?? [];
   for (const acc of accounts) {
     if (!acc || typeof acc !== "object") continue;
@@ -95,20 +87,20 @@ export function extractStarknetPrivyWallet(user: { linkedAccounts?: unknown[] } 
   return null;
 }
 
-/** Wallet payload returned by `extended-chains` createWallet (snake_case and/or camelCase). */
-function credsFromPrivyApiWallet(w: {
-  id: string;
-  chain_type?: string;
-  chainType?: string;
-  public_key?: string;
-  publicKey?: string;
-} | null | undefined) {
-  if (!w) return null;
-  const chain = String(w.chain_type ?? w.chainType ?? "").toLowerCase();
-  if (chain !== "starknet") return null;
-  const pk = w.public_key ?? w.publicKey;
-  if (typeof w.id === "string" && typeof pk === "string" && pk.length > 0) {
-    return { walletId: w.id, publicKey: pk };
+function extractStarknetAddress(user: PrivyUserLike | null | undefined): string | null {
+  const directAddress = user?.wallet?.address;
+  const directChain = String(user?.wallet?.chainType ?? user?.wallet?.chain_type ?? "").toLowerCase();
+  if (directChain === "starknet" && typeof directAddress === "string" && directAddress.length > 0) {
+    return directAddress;
+  }
+  const accounts = user?.linkedAccounts ?? [];
+  for (const acc of accounts) {
+    if (!acc || typeof acc !== "object") continue;
+    const w = acc as LinkedWalletLike;
+    if (w.type !== "wallet") continue;
+    const chain = String(w.chainType ?? w.chain_type ?? "").toLowerCase();
+    if (chain !== "starknet") continue;
+    if (typeof w.address === "string" && w.address.length > 0) return w.address;
   }
   return null;
 }
@@ -120,9 +112,7 @@ async function privyRawSignWithAccessToken(
   appId: string
 ): Promise<string> {
   const token = await getAccessToken();
-  if (!token) {
-    throw new Error("Missing Privy session token");
-  }
+  if (!token) throw new Error("Missing Privy session token");
   const res = await fetch(`${PRIVY_API_BASE}/wallets/${walletId}/raw_sign`, {
     method: "POST",
     headers: {
@@ -138,9 +128,7 @@ async function privyRawSignWithAccessToken(
   }
   const json = (await res.json()) as { signature?: string; data?: { signature?: string } };
   const sig = json.signature ?? json.data?.signature;
-  if (typeof sig !== "string") {
-    throw new Error("Privy raw_sign: missing signature in response");
-  }
+  if (typeof sig !== "string") throw new Error("Privy raw_sign: missing signature in response");
   return sig;
 }
 
@@ -166,13 +154,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
   const sdk = useStarkzap();
   const { createWallet: createExtendedChainWallet } = useCreateWallet();
   const { refreshUser } = useUser();
-  const {
-    ready: privyReady,
-    authenticated,
-    user,
-    getAccessToken
-  } = usePrivy();
-
+  const { ready: privyReady, authenticated, user, getAccessToken } = usePrivy();
   const appId = process.env.NEXT_PUBLIC_PRIVY_APP_ID ?? "";
   const sponsoredEnabled = CARTRIDGE_PAYMASTER_NODE_URL.length > 0;
 
@@ -183,8 +165,6 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
   const [walletError, setWalletError] = useState<string | null>(null);
 
   const connectingRef = useRef(false);
-  /** Only one programmatic Starknet create per login session (Privy extended-chains). */
-  const attemptedStarknetCreateRef = useRef(false);
   const walletRef = useRef<WalletInterface | null>(null);
   walletRef.current = wallet;
   const userRef = useRef(user);
@@ -208,86 +188,83 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
 
     connectingRef.current = true;
     setWalletLoading(true);
-    setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
+    setWalletStatusText("Creating your Starknet wallet... (10-25 seconds)");
     setWalletError(null);
 
     try {
       console.log("[useStarkzap] authenticated user", currentUser);
-      let creds = extractStarknetPrivyWallet(currentUser);
+      const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
+      const createEmbeddedWallet = sdkWalletApi.wallet?.createEmbeddedWallet;
+      if (typeof createEmbeddedWallet === "function") {
+        // First login: create wallet without paymaster to avoid provisioning failures.
+        const created = await createEmbeddedWallet({
+          chain: "starknet",
+          paymaster: null
+        });
+        console.log("[useStarkzap] createEmbeddedWallet result", created);
 
-      if (!creds && !attemptedStarknetCreateRef.current) {
-        attemptedStarknetCreateRef.current = true;
-        setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
-        try {
-          const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
-          const maybeEmbeddedWalletCreator = sdkWalletApi.wallet?.createEmbeddedWallet;
-          let apiWallet: {
-            id: string;
-            chain_type?: string;
-            chainType?: string;
-            public_key?: string;
-            publicKey?: string;
-          } | null = null;
-          let userAfterCreate = currentUser;
-          if (typeof maybeEmbeddedWalletCreator === "function") {
-            // Disable paymaster only for initial embedded wallet creation.
-            const wallet = await sdkWalletApi.wallet!.createEmbeddedWallet({
-              chain: "starknet",
-              paymaster: null
-            });
-            console.log("[useStarkzap] sdk.wallet.createEmbeddedWallet result", wallet);
-            const maybeFresh = await refreshUser();
-            userAfterCreate = maybeFresh ?? currentUser;
-          } else {
-            const created = await createExtendedChainWallet({ chainType: "starknet" });
-            userAfterCreate = created.user ?? currentUser;
-            apiWallet = created.wallet ?? null;
-            console.log("[useStarkzap] createExtendedChainWallet result", created);
-          }
-          creds = extractStarknetPrivyWallet(userAfterCreate) ?? credsFromPrivyApiWallet(apiWallet);
-          if (!creds) {
-            setWalletStatusText("Creating wallet... (this may take 15-25 seconds on first login)");
-            creds = await waitForStarknetWallet(refreshUser);
-          }
-        } catch (e) {
-          attemptedStarknetCreateRef.current = false;
-          const msg = e instanceof Error ? e.message : String(e);
-          if (/already|exist|duplicate/i.test(msg)) {
-            creds = await waitForStarknetWallet(refreshUser);
-          } else {
-            throw e;
-          }
+        // Future transactions: re-enable Cartridge paymaster.
+        if (sponsoredEnabled && sdkWalletApi.wallet?.setPaymaster) {
+          sdkWalletApi.wallet.setPaymaster({
+            nodeUrl: CARTRIDGE_PAYMASTER_NODE_URL
+          });
         }
-      }
 
-      if (!creds) {
-        creds = await waitForStarknetWallet(refreshUser, 4, 1000);
-      }
+        const createdWallet = created as WalletInterface | null;
+        const createdAddress =
+          createdWallet && createdWallet.address != null ? String(createdWallet.address) : "";
+        if (!createdWallet || !createdAddress) {
+          throw new Error("Embedded wallet created but not ready yet. Please retry.");
+        }
 
-      if (!creds) {
-        setWalletError("No Starknet embedded wallet found. Enable Starknet in the Privy dashboard.");
+        setWallet(createdWallet);
+        let preview: string | undefined;
+        try {
+          const w = createdWallet as unknown as { getBalance?: () => Promise<unknown> };
+          if (typeof w.getBalance === "function") {
+            const bal = await w.getBalance();
+            preview = bal !== undefined ? `${bal?.toString?.() ?? bal}` : undefined;
+          }
+        } catch {
+          preview = undefined;
+        }
+        setBalancePreview(preview);
         setWalletStatusText(null);
         return;
       }
 
+      console.warn("[useStarkzap] createEmbeddedWallet unavailable; using Privy onboard fallback");
+      const existingAddress = extractStarknetAddress(currentUser as PrivyUserLike);
+      if (existingAddress) {
+        // Compatibility path: if user already has Starknet embedded wallet, use its address directly.
+        setWallet({ address: existingAddress } as unknown as WalletInterface);
+        setBalancePreview(undefined);
+        setWalletStatusText(null);
+        return;
+      }
       setWalletStatusText("Connecting Starknet wallet...");
-      const baseOnboardPayload = {
-        strategy: OnboardStrategy.Privy,
-        privy: {
-          resolve: async () => ({
-            walletId: creds!.walletId,
-            publicKey: creds!.publicKey,
-            rawSign: async (wid: string, hash: string) =>
-              privyRawSignWithAccessToken(wid, hash, getAccessToken, appId)
-          })
-        },
-        deploy: "if_needed" as const
-      };
+      const created = await createExtendedChainWallet({ chainType: "starknet" });
+      const fresh = await refreshUser();
+      const creds =
+        extractStarknetPrivyWallet(created.user ?? fresh ?? currentUser) ??
+        extractStarknetPrivyWallet(fresh);
+      if (!creds) {
+        throw new Error("No Starknet embedded wallet found after creation.");
+      }
 
       let result: { wallet: WalletInterface };
       try {
         result = await sdk.onboard({
-          ...baseOnboardPayload,
+          strategy: OnboardStrategy.Privy,
+          privy: {
+            resolve: async () => ({
+              walletId: creds.walletId,
+              publicKey: creds.publicKey,
+              rawSign: async (wid: string, hash: string) =>
+                privyRawSignWithAccessToken(wid, hash, getAccessToken, appId)
+            })
+          },
+          deploy: "if_needed",
           feeMode: sponsoredEnabled ? "sponsored" : "user_pays"
         });
       } catch (error) {
@@ -295,18 +272,26 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
         const paymasterMethodUnsupported =
           sponsoredEnabled && /paymaster_buildTransaction|Method not found/i.test(msg);
         if (!paymasterMethodUnsupported) throw error;
-        // If endpoint is not a paymaster RPC, fallback to user-pays so wallet onboarding still works.
         result = await sdk.onboard({
-          ...baseOnboardPayload,
+          strategy: OnboardStrategy.Privy,
+          privy: {
+            resolve: async () => ({
+              walletId: creds.walletId,
+              publicKey: creds.publicKey,
+              rawSign: async (wid: string, hash: string) =>
+                privyRawSignWithAccessToken(wid, hash, getAccessToken, appId)
+            })
+          },
+          deploy: "if_needed",
           feeMode: "user_pays"
         });
       }
 
-      setWallet(result.wallet);
-
+      const createdWallet = result.wallet;
+      setWallet(createdWallet);
       let preview: string | undefined;
       try {
-        const w = result.wallet as unknown as { getBalance?: () => Promise<unknown> };
+        const w = createdWallet as unknown as { getBalance?: () => Promise<unknown> };
         if (typeof w.getBalance === "function") {
           const bal = await w.getBalance();
           preview = bal !== undefined ? `${bal?.toString?.() ?? bal}` : undefined;
@@ -317,7 +302,10 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
       setBalancePreview(preview);
       setWalletStatusText(null);
     } catch (e) {
-      console.error(e);
+      console.error("[useStarkzap] wallet creation failed", e, {
+        user: currentUser,
+        message: e instanceof Error ? e.message : String(e)
+      });
       setWallet(null);
       setBalancePreview(undefined);
       setWalletStatusText(null);
@@ -353,7 +341,6 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
       setWalletStatusText(null);
       setWalletError(null);
       setWalletLoading(false);
-      attemptedStarknetCreateRef.current = false;
       return;
     }
     // Ref avoids effect loops when `connectStarkWallet` identity changes (Privy hooks).

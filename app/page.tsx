@@ -140,7 +140,7 @@ export default function HomePage() {
             <span className="flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-800/80 bg-slate-950/50 px-3 py-2 text-xs text-slate-400 sm:min-h-0 sm:rounded-full sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
               <span className="min-w-0 break-words">
-                {walletStatusText ?? "Creating wallet... (this may take 15-25 seconds on first login)"}
+                {walletStatusText ?? "Creating your Starknet wallet... (10-25 seconds)"}
               </span>
             </span>
           )}
