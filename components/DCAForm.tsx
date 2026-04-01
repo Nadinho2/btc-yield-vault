@@ -3,52 +3,48 @@
 import { useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import type { StarkZap } from "starkzap";
+import { Amount, type WalletInterface } from "starkzap";
+import { SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
 
-type DcaSdkLike = {
-  dca?: {
-    createPlan?: (args: {
-      asset: "BTC" | "USDC";
-      amount: number;
-      frequency: "weekly" | "monthly";
-      durationMonths: 3 | 6 | 12;
-      privacy: "tongo" | "public";
-    }) => Promise<{ txHash?: string; hash?: string } | undefined>;
-  };
+type TxPayload = {
+  hash: string;
+  type: "DCA";
+  amountLabel: string;
 };
 
 type Props = {
-  sdk: StarkZap | DcaSdkLike;
+  wallet: WalletInterface | null;
   walletAddress?: string;
   isConnected: boolean;
+  explorerBaseUrl: string;
+  balances: Record<Asset, number>;
   privateMode: boolean;
   onPrivateModeChange: (value: boolean) => void;
+  /** After confirmed on-chain success: refresh balances/history + local history row */
+  onTransactionComplete?: (payload: TxPayload) => void;
 };
 
 type Asset = "BTC" | "USDC";
 type Frequency = "weekly" | "monthly";
 type Duration = 3 | 6 | 12;
 
-const MOCK_BALANCES: Record<Asset, number> = {
-  BTC: 0.2384,
-  USDC: 12450
-};
-
 export function DCAForm({
-  sdk,
+  wallet,
   walletAddress,
   isConnected,
+  explorerBaseUrl,
+  balances,
   privateMode,
-  onPrivateModeChange
+  onPrivateModeChange,
+  onTransactionComplete
 }: Props) {
-  const sdkWithDca = sdk as DcaSdkLike;
-  const [asset, setAsset] = useState<Asset>("BTC");
+  const [asset, setAsset] = useState<Asset>("USDC");
   const [amount, setAmount] = useState<string>("");
   const [frequency, setFrequency] = useState<Frequency>("weekly");
   const [duration, setDuration] = useState<Duration>(6);
   const [isCreating, setIsCreating] = useState(false);
 
-  const maxBalance = useMemo(() => MOCK_BALANCES[asset], [asset]);
+  const maxBalance = useMemo(() => balances[asset] ?? 0, [asset, balances]);
 
   const estimatedExecutions = useMemo(() => {
     const interval = frequency === "weekly" ? 4 : 1;
@@ -62,7 +58,7 @@ export function DCAForm({
   }, [amount, estimatedExecutions]);
 
   const handleCreatePlan = async () => {
-    if (!isConnected || !walletAddress) {
+    if (!isConnected || !walletAddress || !wallet) {
       toast.error("Connect your wallet first");
       return;
     }
@@ -72,38 +68,58 @@ export function DCAForm({
       toast.error("Enter a valid amount");
       return;
     }
+    if (parsedAmount > maxBalance) {
+      toast.error("Insufficient balance", {
+        description: `You only have ${maxBalance.toFixed(asset === "BTC" ? 6 : 2)} ${asset}.`
+      });
+      return;
+    }
+
+    const sellToken = asset === "USDC" ? SEPOLIA_USDC : SEPOLIA_WBTC;
+    const buyToken = asset === "USDC" ? SEPOLIA_WBTC : SEPOLIA_USDC;
+    const frequencyIso = frequency === "weekly" ? "P1W" : "P1M";
 
     setIsCreating(true);
     try {
-      const res = await sdkWithDca.dca?.createPlan?.({
-        asset,
-        amount: parsedAmount,
-        frequency,
-        durationMonths: duration,
-        privacy: privateMode ? "tongo" : "public"
+      const sellAmount = Amount.parse(String(parsedAmount), sellToken);
+      const sellAmountPerCycle = Amount.parse(String(perExecution), sellToken);
+
+      const tx = await wallet.dca().create(
+        {
+          sellToken,
+          buyToken,
+          sellAmount,
+          sellAmountPerCycle,
+          frequency: frequencyIso
+        },
+        { feeMode: "sponsored" }
+      );
+
+      await tx.wait();
+
+      const hash = tx.hash;
+      const amountLabel = `${parsedAmount.toLocaleString(undefined, {
+        maximumFractionDigits: asset === "USDC" ? 2 : 6
+      })} ${asset}`;
+
+      toast.success("DCA plan created (gasless)", {
+        description: `${duration} months · ${frequency} · ${amountLabel} total budget on Sepolia. ${privateMode ? "Private mode on." : ""}`
       });
 
-      const txHash =
-        res?.txHash ??
-        res?.hash ??
-        `0x${Math.floor(Math.random() * 10 ** 14).toString(16)}${Date.now().toString(16)}`;
-
-      toast.success("Gasless DCA plan created", {
-        description: `Your ${duration}-month ${frequency} plan is now active.`
-      });
-
-      const explorerUrl = `https://starkscan.co/tx/${txHash}`;
-      toast("View on explorer", {
+      const explorerUrl = `${explorerBaseUrl}/tx/${hash}`;
+      toast("View on Starkscan", {
         description: explorerUrl,
         action: {
           label: "Open",
           onClick: () => window.open(explorerUrl, "_blank", "noopener,noreferrer")
         }
       });
+
+      onTransactionComplete?.({ hash, type: "DCA", amountLabel });
     } catch (error) {
       console.error(error);
       toast.error("Failed to create DCA plan", {
-        description: "Please review your inputs and try again."
+        description: error instanceof Error ? error.message : "Please review your inputs and try again."
       });
     } finally {
       setIsCreating(false);
@@ -119,18 +135,18 @@ export function DCAForm({
               <CalendarClock className="h-3 w-3" />
               Automated DCA
             </p>
-            <h3 className="mt-3 text-lg font-semibold text-white">Start Bitcoin DCA</h3>
+            <h3 className="mt-3 text-lg font-semibold text-white">DCA into BTC or stables</h3>
             <p className="mt-1 text-xs text-slate-300">
-              Set once and let StarkZap execute your gasless recurring strategy.
+              Uses <span className="font-medium text-slate-200">wallet.dca().create()</span> on StarkZap (gasless sponsored fees on Sepolia).
             </p>
           </div>
         </div>
 
         <div className="mt-5 grid gap-3">
           <div>
-            <p className="mb-1.5 text-xs text-slate-400">Asset</p>
+            <p className="mb-1.5 text-xs text-slate-400">Sell asset</p>
             <div className="grid grid-cols-2 gap-2">
-              {(["BTC", "USDC"] as Asset[]).map((opt) => (
+              {(["USDC", "BTC"] as Asset[]).map((opt) => (
                 <button
                   key={opt}
                   type="button"
@@ -141,22 +157,28 @@ export function DCAForm({
                       : "border-slate-800 bg-slate-950/50 text-slate-300 hover:border-primary/50"
                   }`}
                 >
-                  {opt}
+                  {opt === "BTC" ? "WBTC" : opt} → {opt === "USDC" ? "WBTC" : "USDC"}
                 </button>
               ))}
             </div>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-slate-500">
+              USDC sells into WBTC; WBTC sells into USDC. Uses Sepolia token presets from StarkZap.
+            </p>
           </div>
 
           <div>
             <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-xs text-slate-400">Amount</p>
-              <p className="text-[11px] text-slate-500">Balance: {maxBalance.toLocaleString()} {asset}</p>
+              <p className="text-xs text-slate-400">Total budget</p>
+              <p className="text-[11px] text-slate-500">
+                Balance: {maxBalance.toLocaleString(undefined, { maximumFractionDigits: asset === "BTC" ? 6 : 2 })}{" "}
+                {asset === "BTC" ? "WBTC" : asset}
+              </p>
             </div>
             <div className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/70 px-3 py-2">
               <input
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder={`Enter ${asset} amount`}
+                placeholder={`Enter total ${asset === "BTC" ? "WBTC" : "USDC"} to sell over the plan`}
                 inputMode="decimal"
                 className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
               />
@@ -215,7 +237,7 @@ export function DCAForm({
           <label className="flex items-center justify-between rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2">
             <div className="flex items-center gap-2">
               <EyeOff className="h-4 w-4 text-primary" />
-              <span className="text-xs text-slate-200">Private mode (Tongo confidential)</span>
+              <span className="text-xs text-slate-200">Private mode (pricing hint)</span>
             </div>
             <input
               type="checkbox"
@@ -227,29 +249,30 @@ export function DCAForm({
 
           <div className="rounded-xl border border-slate-800/80 bg-slate-900/50 px-3 py-2 text-xs text-slate-300">
             <p>
-              Plan preview: {estimatedExecutions} executions, about{" "}
+              Plan preview: {estimatedExecutions} cycles, ~{" "}
               <span className="font-semibold text-white">
-                {perExecution ? perExecution.toFixed(4) : "0"} {asset}
+                {perExecution ? perExecution.toFixed(6) : "0"}{" "}
+                {asset === "BTC" ? "WBTC" : "USDC"}
               </span>{" "}
-              each.
+              per cycle.
             </p>
           </div>
         </div>
 
         <button
           type="button"
-          disabled={!isConnected || isCreating}
+          disabled={!isConnected || !wallet || isCreating || maxBalance <= 0}
           onClick={handleCreatePlan}
           className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white shadow-lg shadow-primary/40 transition hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isCreating ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Creating plan...
+              Confirming on Sepolia…
             </>
           ) : (
             <>
-              Create Gasless DCA Plan
+              Create DCA plan
               <ArrowUpRight className="h-4 w-4" />
             </>
           )}
@@ -258,4 +281,3 @@ export function DCAForm({
     </article>
   );
 }
-

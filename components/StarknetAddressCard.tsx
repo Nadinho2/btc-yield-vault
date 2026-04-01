@@ -4,10 +4,13 @@ import { useMemo } from "react";
 import { Copy, ExternalLink, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import type { WalletInterface } from "starkzap";
+import type { StarknetNetwork } from "@/hooks/useStarkzap";
 
 type Props = {
   wallet: WalletInterface | null;
   walletReady: boolean;
+  network: StarknetNetwork;
+  explorerBaseUrl: string;
 };
 
 function normalizeAddress(w: WalletInterface | null): string | null {
@@ -18,7 +21,7 @@ function normalizeAddress(w: WalletInterface | null): string | null {
   return null;
 }
 
-export function StarknetAddressCard({ wallet, walletReady }: Props) {
+export function StarknetAddressCard({ wallet, walletReady, network, explorerBaseUrl }: Props) {
   const fullAddress = useMemo(() => normalizeAddress(wallet), [wallet]);
 
   const short =
@@ -26,9 +29,7 @@ export function StarknetAddressCard({ wallet, walletReady }: Props) {
       ? `${fullAddress.slice(0, 6)}…${fullAddress.slice(-4)}`
       : fullAddress ?? "";
 
-  const explorerUrl = fullAddress
-    ? `https://sepolia.starkscan.co/contract/${encodeURIComponent(fullAddress)}`
-    : null;
+  const explorerUrl = fullAddress ? `${explorerBaseUrl}/contract/${encodeURIComponent(fullAddress)}` : null;
 
   const copyAddress = async () => {
     if (!fullAddress) return;
@@ -56,8 +57,8 @@ export function StarknetAddressCard({ wallet, walletReady }: Props) {
               Your Starknet wallet address
             </h2>
             <p className="mt-1 text-sm text-slate-400">
-              Connect your wallet and complete setup to see your Sepolia Starknet address, copy it, and
-              open it on Starkscan.
+              Connect your wallet and complete setup to view your Starknet address, copy it, and open it
+              on Starkscan for the selected network.
             </p>
           </div>
         </div>
@@ -77,7 +78,7 @@ export function StarknetAddressCard({ wallet, walletReady }: Props) {
               Your Starknet wallet address
             </h2>
             <p className="mt-0.5 text-xs font-medium uppercase tracking-wider text-primary/90">
-              Sepolia testnet
+              {network === "mainnet" ? "Mainnet" : "Sepolia testnet"}
             </p>
             <p className="mt-3 font-mono text-base font-semibold tracking-tight text-white">{short}</p>
             <p className="mt-2 break-all font-mono text-xs leading-relaxed text-slate-400">{fullAddress}</p>
@@ -101,7 +102,7 @@ export function StarknetAddressCard({ wallet, walletReady }: Props) {
               className="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-slate-700/90 bg-slate-900/60 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:border-primary/50 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
             >
               <ExternalLink className="h-4 w-4 shrink-0" />
-              Starkscan (Sepolia)
+              Starkscan ({network === "mainnet" ? "Mainnet" : "Sepolia"})
             </a>
           )}
         </div>

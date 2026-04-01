@@ -10,13 +10,19 @@ const PRIVY_API_BASE = "https://api.privy.io/v1";
 const CARTRIDGE_PAYMASTER_NODE_URL =
   process.env.NEXT_PUBLIC_CARTRIDGE_PAYMASTER_NODE_URL?.trim() ?? "";
 
-let singletonSdk: StarkZap | null = null;
+export type StarknetNetwork = "sepolia" | "mainnet";
 
-function getStarkzap(): StarkZap {
-  if (!singletonSdk) {
+const sdkByNetwork: Partial<Record<StarknetNetwork, StarkZap>> = {};
+
+export function getExplorerBaseUrl(network: StarknetNetwork): string {
+  return network === "mainnet" ? "https://starkscan.co" : "https://sepolia.starkscan.co";
+}
+
+function getStarkzap(network: StarknetNetwork): StarkZap {
+  if (!sdkByNetwork[network]) {
     const sponsoredEnabled = CARTRIDGE_PAYMASTER_NODE_URL.length > 0;
     const sdkConfig: SDKConfig & { gasless?: boolean } = {
-      network: "sepolia",
+      network,
       gasless: sponsoredEnabled
     };
     if (sponsoredEnabled) {
@@ -25,16 +31,16 @@ function getStarkzap(): StarkZap {
       };
     }
 
-    singletonSdk = new StarkZap(sdkConfig);
+    sdkByNetwork[network] = new StarkZap(sdkConfig);
   }
-  return singletonSdk;
+  return sdkByNetwork[network] as StarkZap;
 }
 
 /**
  * Singleton StarkZap v2 client (sepolia, gasless).
  */
-export function useStarkzap(): StarkZap {
-  return useMemo(() => getStarkzap(), []);
+export function useStarkzap(network: StarknetNetwork): StarkZap {
+  return useMemo(() => getStarkzap(network), [network]);
 }
 
 type StarkZapEmbeddedWalletApi = {
@@ -141,6 +147,7 @@ export type UseStarkzapWalletResult = {
   walletLoading: boolean;
   walletStatusText: string | null;
   walletError: string | null;
+  network: StarknetNetwork;
   /** Same as StarkZap `wallet.connect()` intent: Privy onboard + ensure ready. */
   connectStarkWallet: () => Promise<void>;
 };
@@ -150,8 +157,8 @@ export type UseStarkzapWalletResult = {
  * `sdk.onboard({ strategy: "privy" })`. If no Starknet wallet exists yet, calls
  * `useCreateWallet` from `@privy-io/react-auth/extended-chains` with `chainType: "starknet"`.
  */
-export function useStarkzapWallet(): UseStarkzapWalletResult {
-  const sdk = useStarkzap();
+export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletResult {
+  const sdk = useStarkzap(network);
   const { createWallet: createExtendedChainWallet } = useCreateWallet();
   const { refreshUser } = useUser();
   const { ready: privyReady, authenticated, user, getAccessToken } = usePrivy();
@@ -188,7 +195,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
 
     connectingRef.current = true;
     setWalletLoading(true);
-    setWalletStatusText("Creating your Starknet wallet... (10-25 seconds)");
+    setWalletStatusText("Setting up your Starknet wallet...");
     setWalletError(null);
 
     try {
@@ -345,7 +352,14 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
     }
     // Ref avoids effect loops when `connectStarkWallet` identity changes (Privy hooks).
     void connectStarkWalletRef.current();
-  }, [privyReady, authenticated, user?.id, linkedAccountsKey]);
+  }, [privyReady, authenticated, user?.id, linkedAccountsKey, network]);
+
+  useEffect(() => {
+    setWallet(null);
+    setBalancePreview(undefined);
+    setWalletError(null);
+    setWalletStatusText("Switching network...");
+  }, [network]);
 
   const walletReady = !!wallet && !!address;
 
@@ -358,6 +372,7 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
     walletLoading,
     walletStatusText,
     walletError,
+    network,
     connectStarkWallet
   };
 }
