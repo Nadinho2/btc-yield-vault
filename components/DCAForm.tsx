@@ -3,9 +3,22 @@
 import { useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import type { StarkZap } from "starkzap";
+
+type DcaSdkLike = {
+  dca?: {
+    createPlan?: (args: {
+      asset: "BTC" | "USDC";
+      amount: number;
+      frequency: "weekly" | "monthly";
+      durationMonths: 3 | 6 | 12;
+      privacy: "tongo" | "public";
+    }) => Promise<{ txHash?: string; hash?: string } | undefined>;
+  };
+};
 
 type Props = {
-  sdk: any;
+  sdk: StarkZap | DcaSdkLike;
   walletAddress?: string;
   isConnected: boolean;
   privateMode: boolean;
@@ -28,6 +41,7 @@ export function DCAForm({
   privateMode,
   onPrivateModeChange
 }: Props) {
+  const sdkWithDca = sdk as DcaSdkLike;
   const [asset, setAsset] = useState<Asset>("BTC");
   const [amount, setAmount] = useState<string>("");
   const [frequency, setFrequency] = useState<Frequency>("weekly");
@@ -61,7 +75,7 @@ export function DCAForm({
 
     setIsCreating(true);
     try {
-      const res = await sdk?.dca?.createPlan?.({
+      const res = await sdkWithDca.dca?.createPlan?.({
         asset,
         amount: parsedAmount,
         frequency,

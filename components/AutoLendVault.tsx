@@ -3,9 +3,24 @@
 import { useMemo, useState } from "react";
 import { Coins, Loader2, TrendingUp, Wallet2 } from "lucide-react";
 import { toast } from "sonner";
+import type { StarkZap } from "starkzap";
+
+type LendingSdkLike = {
+  lending?: {
+    depositToVesu?: (args: {
+      asset: "BTC";
+      amount: number;
+      privacy: "tongo" | "public";
+    }) => Promise<{ txHash?: string; hash?: string } | undefined>;
+    withdrawFromVesu?: (args: {
+      asset: "BTC";
+      amount: number;
+    }) => Promise<unknown>;
+  };
+};
 
 type Props = {
-  sdk: any;
+  sdk: StarkZap | LendingSdkLike;
   isConnected: boolean;
   privateMode: boolean;
 };
@@ -16,6 +31,7 @@ const BASE_HOLDINGS = {
 };
 
 export function AutoLendVault({ sdk, isConnected, privateMode }: Props) {
+  const sdkWithLending = sdk as LendingSdkLike;
   const [isDepositing, setIsDepositing] = useState(false);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [apr, setApr] = useState(3.4);
@@ -40,7 +56,7 @@ export function AutoLendVault({ sdk, isConnected, privateMode }: Props) {
     }
     setIsDepositing(true);
     try {
-      const res = await sdk?.lending?.depositToVesu?.({
+      const res = await sdkWithLending.lending?.depositToVesu?.({
         asset: "BTC",
         amount: depositAmount,
         privacy: privateMode ? "tongo" : "public"
@@ -78,7 +94,7 @@ export function AutoLendVault({ sdk, isConnected, privateMode }: Props) {
     }
     setIsWithdrawing(true);
     try {
-      await sdk?.lending?.withdrawFromVesu?.({
+      await sdkWithLending.lending?.withdrawFromVesu?.({
         asset: "BTC",
         amount: holdings.lentBTC
       });

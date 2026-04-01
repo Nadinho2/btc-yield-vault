@@ -49,10 +49,7 @@ export default function HomePage() {
   }, [walletReady, authenticated]);
 
   useEffect(() => {
-    if (!walletReady || !wallet) {
-      setTxHistory([]);
-      return;
-    }
+    if (!walletReady || !wallet) return;
     let cancelled = false;
     const sdkAny = starkzap as { getHistory?: () => Promise<unknown> };
     const wAny = wallet as { getHistory?: () => Promise<unknown> };
@@ -80,6 +77,8 @@ export default function HomePage() {
       cancelled = true;
     };
   }, [walletReady, wallet, starkzap]);
+
+  const visibleTxHistory = walletReady && wallet ? txHistory : [];
 
   const shortAddress =
     walletAddress && `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`;
@@ -296,12 +295,12 @@ export default function HomePage() {
               <Clock3 className="h-4 w-4 text-slate-400" />
             </div>
             <div className="mt-3 space-y-2">
-              {txHistory.length === 0 ? (
+              {visibleTxHistory.length === 0 ? (
                 <p className="rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-6 text-center text-sm text-slate-500">
                   No transactions yet
                 </p>
               ) : (
-                txHistory.map((tx, i) => (
+                visibleTxHistory.map((tx, i) => (
                   <div
                     key={i}
                     className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300"

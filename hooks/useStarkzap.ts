@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCreateWallet } from "@privy-io/react-auth/extended-chains";
 import { OnboardStrategy, StarkZap } from "starkzap";
-import type { WalletInterface } from "starkzap";
+import type { SDKConfig, WalletInterface } from "starkzap";
 
 const PRIVY_API_BASE = "https://api.privy.io/v1";
 const CARTRIDGE_PAYMASTER_NODE_URL =
@@ -15,7 +15,7 @@ let singletonSdk: StarkZap | null = null;
 
 function getStarkzap(): StarkZap {
   if (!singletonSdk) {
-    const sdkConfig: any = {
+    const sdkConfig: SDKConfig & { gasless?: boolean } = {
       network: "sepolia",
       gasless: true,
       paymaster: {
@@ -227,13 +227,13 @@ export function useStarkzapWallet(): UseStarkzapWalletResult {
         },
         deploy: "if_needed",
         feeMode: "sponsored"
-      } as any);
+      });
 
       setWallet(result.wallet);
 
       let preview: string | undefined;
       try {
-        const w = result.wallet as any;
+        const w = result.wallet as unknown as { getBalance?: () => Promise<unknown> };
         if (typeof w.getBalance === "function") {
           const bal = await w.getBalance();
           preview = bal !== undefined ? `${bal?.toString?.() ?? bal}` : undefined;
