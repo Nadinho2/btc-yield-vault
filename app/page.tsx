@@ -23,6 +23,8 @@ import {
 import { toast } from "sonner";
 import { DCAForm } from "@/components/DCAForm";
 import { AutoLendVault } from "@/components/AutoLendVault";
+import { SendTokensCard } from "@/components/SendTokensCard";
+import { SwapTokensCard } from "@/components/SwapTokensCard";
 import { StarknetAddressCard } from "@/components/StarknetAddressCard";
 import { getExplorerBaseUrl } from "@/hooks/useStarkzap";
 import { FALLBACK_SUPPLY_APY, SEPOLIA_STRK, SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
@@ -37,7 +39,7 @@ type WalletBalanceMap = {
 type TxEntry = {
   hash: string;
   status: string;
-  type: "DCA" | "Deposit" | "Swap";
+  type: "DCA" | "Deposit" | "Swap" | "Send";
   amountLabel: string;
   timestampLabel?: string;
 };
@@ -170,11 +172,13 @@ function normalizeHistory(raw: unknown[]): TxEntry[] {
             ? tx.action
             : "swap";
       const upperType = typeRaw.toUpperCase();
-      const type: "DCA" | "Deposit" | "Swap" = upperType.includes("DCA")
+      const type: TxEntry["type"] = upperType.includes("DCA")
         ? "DCA"
         : upperType.includes("DEPOSIT") || upperType.includes("LEND")
           ? "Deposit"
-          : "Swap";
+          : upperType.includes("SEND") || upperType.includes("TRANSFER")
+            ? "Send"
+            : "Swap";
       const amountValue =
         normalizeNumber(tx.amount) ??
         normalizeNumber(tx.value) ??
@@ -204,6 +208,9 @@ export default function HomePage() {
     address: walletAddress,
     balancePreview,
     walletReady,
+    walletOpsCapable,
+    accountDeployed,
+    sponsoredFeesEnabled,
     walletLoading,
     walletStatusText,
     walletError,
@@ -649,6 +656,45 @@ export default function HomePage() {
             onTransactionComplete={handleTransactionComplete}
           />
         </div>
+
+        {walletReady && !walletOpsCapable && (
+          <div className="rounded-xl border border-slate-800/80 bg-slate-950/40 px-4 py-3 text-center text-xs leading-relaxed text-slate-400">
+            Send and swap use StarkZap <span className="text-slate-300">wallet.transfer</span> and{" "}
+            <span className="text-slate-300">wallet.swap</span>. Complete embedded wallet setup (or reload after login)
+            if this message persists while connected.
+          </div>
+        )}
+        {walletReady && walletOpsCapable && accountDeployed === null && (
+          <p className="flex items-center justify-center gap-2 text-center text-xs text-slate-500">
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+            Confirming account deployment for send &amp; swap…
+          </p>
+        )}
+        {walletReady && walletOpsCapable && accountDeployed === false && (
+          <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3 text-center text-xs leading-relaxed text-amber-200/90">
+            Send and swap appear here after your Starknet account is deployed on Sepolia. If you just connected, wait a
+            moment and balances should update.
+          </div>
+        )}
+        {walletReady && walletOpsCapable && accountDeployed === true && wallet ? (
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SendTokensCard
+              wallet={wallet}
+              explorerBaseUrl={explorerBaseUrl}
+              balances={displayBalances}
+              sponsoredFeesEnabled={sponsoredFeesEnabled}
+              selfAddress={walletAddress ?? ""}
+              onTransactionComplete={handleTransactionComplete}
+            />
+            <SwapTokensCard
+              wallet={wallet}
+              explorerBaseUrl={explorerBaseUrl}
+              balances={displayBalances}
+              sponsoredFeesEnabled={sponsoredFeesEnabled}
+              onTransactionComplete={handleTransactionComplete}
+            />
+          </div>
+        ) : null}
       </section>
 
       <section className="mx-auto mt-8 grid w-full max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -669,7 +715,7 @@ export default function HomePage() {
                     <History className="h-7 w-7 text-primary" aria-hidden />
                   </div>
                   <p className="mt-4 max-w-sm text-sm font-medium text-slate-200">
-                    No transactions yet. Your history will appear after your first DCA or Vesu deposit.
+                    No transactions yet. History appears after a DCA plan, Vesu action, send, or swap.
                   </p>
                   <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-500">
                     On-chain activity from StarkZap will merge here when the history API is available for your session.

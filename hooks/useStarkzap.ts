@@ -144,6 +144,11 @@ export type UseStarkzapWalletResult = {
   address: string | null;
   balancePreview: string | undefined;
   walletReady: boolean;
+  /** True when the connected object exposes StarkZap wallet transfer/swap (full SDK wallet). */
+  walletOpsCapable: boolean;
+  /** Null while checking; false if not deployed or stub wallet; true when safe to transact. */
+  accountDeployed: boolean | null;
+  sponsoredFeesEnabled: boolean;
   walletLoading: boolean;
   walletStatusText: string | null;
   walletError: string | null;
@@ -170,6 +175,7 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
   const [walletLoading, setWalletLoading] = useState(false);
   const [walletStatusText, setWalletStatusText] = useState<string | null>(null);
   const [walletError, setWalletError] = useState<string | null>(null);
+  const [accountDeployed, setAccountDeployed] = useState<boolean | null>(null);
 
   const connectingRef = useRef(false);
   const walletRef = useRef<WalletInterface | null>(null);
@@ -182,6 +188,37 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
       ? wallet.address
       : String(wallet.address)
     : null;
+
+  const walletOpsCapable = useMemo(() => {
+    if (!wallet) return false;
+    const w = wallet as WalletInterface;
+    return typeof w.transfer === "function" && typeof w.swap === "function";
+  }, [wallet]);
+
+  useEffect(() => {
+    if (!wallet) {
+      setAccountDeployed(null);
+      return;
+    }
+    const w = wallet as WalletInterface & { isDeployed?: () => Promise<boolean> };
+    if (!walletOpsCapable || typeof w.isDeployed !== "function") {
+      setAccountDeployed(false);
+      return;
+    }
+    let cancelled = false;
+    setAccountDeployed(null);
+    void w
+      .isDeployed()
+      .then((deployed) => {
+        if (!cancelled) setAccountDeployed(deployed);
+      })
+      .catch(() => {
+        if (!cancelled) setAccountDeployed(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [wallet, walletOpsCapable]);
 
   const connectStarkWallet = useCallback(async () => {
     const currentUser = userRef.current;
@@ -199,7 +236,6 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
     setWalletError(null);
 
     try {
-      console.log("[useStarkzap] authenticated user", currentUser);
       const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
       const createEmbeddedWallet = sdkWalletApi.wallet?.createEmbeddedWallet;
       if (typeof createEmbeddedWallet === "function") {
@@ -208,7 +244,6 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
           chain: "starknet",
           paymaster: null
         });
-        console.log("[useStarkzap] createEmbeddedWallet result", created);
 
         // Future transactions: re-enable Cartridge paymaster.
         if (sponsoredEnabled && sdkWalletApi.wallet?.setPaymaster) {
@@ -240,7 +275,6 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
         return;
       }
 
-      console.warn("[useStarkzap] createEmbeddedWallet unavailable; using Privy onboard fallback");
       const existingAddress = extractStarknetAddress(currentUser as PrivyUserLike);
       if (existingAddress) {
         // Compatibility path: if user already has Starknet embedded wallet, use its address directly.
@@ -358,6 +392,7 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
     setWallet(null);
     setBalancePreview(undefined);
     setWalletError(null);
+    setAccountDeployed(null);
     setWalletStatusText("Switching network...");
   }, [network]);
 
@@ -369,6 +404,9 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
     address,
     balancePreview,
     walletReady,
+    walletOpsCapable,
+    accountDeployed,
+    sponsoredFeesEnabled: sponsoredEnabled,
     walletLoading,
     walletStatusText,
     walletError,
