@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePrivy, useUser } from "@privy-io/react-auth";
 import { useCreateWallet } from "@privy-io/react-auth/extended-chains";
-import { toast } from "sonner";
 import { OnboardStrategy, StarkZap } from "starkzap";
 import type { SDKConfig, WalletInterface } from "starkzap";
 
@@ -48,7 +47,6 @@ type StarkZapEmbeddedWalletApi = {
   wallet?: {
     createEmbeddedWallet?: (args: { chain: "starknet"; paymaster: null }) => Promise<unknown>;
     setPaymaster?: (args: { nodeUrl: string }) => void;
-    exportPrivateKey?: () => Promise<string>;
   };
 };
 
@@ -152,8 +150,6 @@ export type UseStarkzapWalletResult = {
   network: StarknetNetwork;
   /** Same as StarkZap `wallet.connect()` intent: Privy onboard + ensure ready. */
   connectStarkWallet: () => Promise<void>;
-  /** Embedded-wallet only: copies Stark private key via `sdk.wallet.exportPrivateKey()` when available. */
-  exportPrivateKey: () => Promise<void>;
 };
 
 /**
@@ -367,32 +363,6 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
 
   const walletReady = !!wallet && !!address;
 
-  const exportPrivateKey = useCallback(async () => {
-    if (!walletRef.current) {
-      toast.error("Wallet not connected");
-      return;
-    }
-    try {
-      const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
-      const exportFn = sdkWalletApi.wallet?.exportPrivateKey;
-      if (typeof exportFn !== "function") {
-        toast.error("Failed to export private key", {
-          description: "Export is not available for this wallet session (embedded API missing)."
-        });
-        return;
-      }
-      const privateKey = await exportFn();
-      await navigator.clipboard.writeText(privateKey);
-      toast.success("✅ Private key copied to clipboard!", {
-        description: "⚠️ Save it somewhere safe. Anyone with this key can control your wallet forever."
-      });
-      console.log("🔑 Exported Private Key:", privateKey);
-    } catch (error) {
-      console.error("Failed to export private key:", error);
-      toast.error("Failed to export private key");
-    }
-  }, [sdk]);
-
   return {
     sdk,
     wallet,
@@ -403,7 +373,6 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
     walletStatusText,
     walletError,
     network,
-    connectStarkWallet,
-    exportPrivateKey
+    connectStarkWallet
   };
 }

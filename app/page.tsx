@@ -17,7 +17,8 @@ import {
   Landmark,
   Zap,
   History,
-  Coins
+  Coins,
+  Info
 } from "lucide-react";
 import { toast } from "sonner";
 import { DCAForm } from "@/components/DCAForm";
@@ -207,8 +208,7 @@ export default function HomePage() {
     walletStatusText,
     walletError,
     wallet,
-    connectStarkWallet,
-    exportPrivateKey
+    connectStarkWallet
   } = useStarkzapWallet(network);
   const { ready, authenticated, login, logout } = usePrivy();
   const [privateMode, setPrivateMode] = useState(true);
@@ -502,14 +502,20 @@ export default function HomePage() {
               explorerBaseUrl={explorerBaseUrl}
             />
           </div>
-          {walletReady && !walletLoading && (
-            <button
-              type="button"
-              onClick={() => void exportPrivateKey()}
-              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-left text-xs font-semibold text-amber-100 shadow-sm transition hover:border-red-500/60 hover:bg-amber-950/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 sm:max-w-[220px]"
-            >
-              ⚠️ Export Private Key (Backup)
-            </button>
+          {walletReady && (
+            <aside className="flex shrink-0 gap-3 rounded-2xl border border-slate-800/90 bg-slate-950/50 px-4 py-3 sm:max-w-sm">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800/80 text-slate-500">
+                <Info className="h-4 w-4" aria-hidden />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Wallet &amp; recovery</p>
+                <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
+                  Your Starknet wallet is securely managed by Privy. You can always recover access by logging in with
+                  the same Google or Email account.
+                </p>
+                <p className="mt-2 text-sm font-medium text-slate-300">No seed phrase is needed.</p>
+              </div>
+            </aside>
           )}
         </div>
       </section>
