@@ -15,14 +15,17 @@ import {
   LogIn,
   Repeat2,
   Landmark,
-  Zap
+  Zap,
+  History,
+  Coins
 } from "lucide-react";
 import { toast } from "sonner";
 import { DCAForm } from "@/components/DCAForm";
 import { AutoLendVault } from "@/components/AutoLendVault";
 import { StarknetAddressCard } from "@/components/StarknetAddressCard";
 import { getExplorerBaseUrl } from "@/hooks/useStarkzap";
-import { FALLBACK_SUPPLY_APY } from "@/lib/starkzap-sepolia";
+import { FALLBACK_SUPPLY_APY, SEPOLIA_STRK, SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
+import type { Token, WalletInterface } from "starkzap";
 
 type WalletBalanceMap = {
   BTC: number;
@@ -100,6 +103,57 @@ async function fetchRealBalances(sdk: unknown): Promise<WalletBalanceMap> {
   return { BTC: 0, USDC: 0, STRK: 0 };
 }
 
+/** Primary path: StarkZap v2 reads ERC-20 balances via the connected wallet (Sepolia). */
+async function fetchBalancesFromWallet(wallet: WalletInterface): Promise<{
+  balances: WalletBalanceMap;
+  tokensReadOk: number;
+}> {
+  const balances: WalletBalanceMap = { BTC: 0, USDC: 0, STRK: 0 };
+  const pairs: { key: keyof WalletBalanceMap; token: Token }[] = [
+    { key: "BTC", token: SEPOLIA_WBTC },
+    { key: "USDC", token: SEPOLIA_USDC },
+    { key: "STRK", token: SEPOLIA_STRK }
+  ];
+  let tokensReadOk = 0;
+  for (const { key, token } of pairs) {
+    try {
+      const amount = await wallet.balanceOf(token);
+      const n = parseFloat(amount.toUnit());
+      if (Number.isFinite(n) && n >= 0) {
+        balances[key] = n;
+        tokensReadOk += 1;
+      }
+    } catch {
+      // Per-token failure must not crash the dashboard
+    }
+  }
+  return { balances, tokensReadOk };
+}
+
+function mergeBalances(walletB: WalletBalanceMap, sdkB: WalletBalanceMap): WalletBalanceMap {
+  return {
+    BTC: walletB.BTC || sdkB.BTC,
+    USDC: walletB.USDC || sdkB.USDC,
+    STRK: walletB.STRK || sdkB.STRK
+  };
+}
+
+function mergeTxHistories(local: TxEntry[], remote: TxEntry[]): TxEntry[] {
+  const seen = new Set<string>();
+  const out: TxEntry[] = [];
+  for (const t of local) {
+    if (seen.has(t.hash)) continue;
+    seen.add(t.hash);
+    out.push(t);
+  }
+  for (const t of remote) {
+    if (seen.has(t.hash)) continue;
+    seen.add(t.hash);
+    out.push(t);
+  }
+  return out;
+}
+
 function normalizeHistory(raw: unknown[]): TxEntry[] {
   return raw
     .map((item): TxEntry | null => {
@@ -158,20 +212,35 @@ export default function HomePage() {
   const { ready, authenticated, login, logout } = usePrivy();
   const [privateMode, setPrivateMode] = useState(true);
   const [balances, setBalances] = useState<WalletBalanceMap>({ BTC: 0, USDC: 0, STRK: 0 });
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [txHistory, setTxHistory] = useState<TxEntry[]>([]);
+  const [balanceReadIssue, setBalanceReadIssue] = useState(false);
+  const [localTxHistory, setLocalTxHistory] = useState<TxEntry[]>([]);
+  const [remoteTxHistory, setRemoteTxHistory] = useState<TxEntry[]>([]);
   const didToastConnected = useRef(false);
   const strategiesRef = useRef<HTMLDivElement | null>(null);
   const howItWorksRef = useRef<HTMLElement | null>(null);
   const explorerBaseUrl = useMemo(() => getExplorerBaseUrl(network), [network]);
   const [txRefreshTick, setTxRefreshTick] = useState(0);
+
+  const displayBalances = useMemo(
+    () => (walletReady && wallet ? balances : { BTC: 0, USDC: 0, STRK: 0 }),
+    [walletReady, wallet, balances]
+  );
+  const displayLocalTxHistory = useMemo(
+    () => (authenticated && walletReady && wallet ? localTxHistory : []),
+    [authenticated, walletReady, wallet, localTxHistory]
+  );
+  const displayRemoteTxHistory = useMemo(
+    () => (walletReady && wallet ? remoteTxHistory : []),
+    [walletReady, wallet, remoteTxHistory]
+  );
+
   const formattedBalances = useMemo(
     () => ({
-      USDC: `${balances.USDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`,
-      BTC: `${balances.BTC.toLocaleString(undefined, { maximumFractionDigits: 6 })} BTC`,
-      STRK: `${balances.STRK.toLocaleString(undefined, { maximumFractionDigits: 4 })} STRK`
+      USDC: `${displayBalances.USDC.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC`,
+      BTC: `${displayBalances.BTC.toLocaleString(undefined, { maximumFractionDigits: 6 })} BTC`,
+      STRK: `${displayBalances.STRK.toLocaleString(undefined, { maximumFractionDigits: 4 })} STRK`
     }),
-    [balances]
+    [displayBalances]
   );
 
   useEffect(() => {
@@ -192,10 +261,26 @@ export default function HomePage() {
 
     const run = async () => {
       try {
-        const next = await fetchRealBalances(starkzap);
-        if (!cancelled) setBalances(next);
+        const { balances: walletB, tokensReadOk } = await fetchBalancesFromWallet(wallet);
+        if (cancelled) return;
+        setBalanceReadIssue(tokensReadOk === 0);
+        let merged = walletB;
+        try {
+          const sdkB = await fetchRealBalances(starkzap);
+          if (!cancelled) merged = mergeBalances(walletB, sdkB);
+        } catch {
+          // SDK balance helpers are optional on StarkZap; wallet path is canonical
+        }
+        if (!cancelled) setBalances(merged);
       } catch {
-        if (!cancelled) setBalances({ BTC: 0, USDC: 0, STRK: 0 });
+        if (cancelled) return;
+        setBalanceReadIssue(true);
+        try {
+          const sdkB = await fetchRealBalances(starkzap);
+          if (!cancelled) setBalances(sdkB);
+        } catch {
+          if (!cancelled) setBalances({ BTC: 0, USDC: 0, STRK: 0 });
+        }
       }
     };
 
@@ -217,29 +302,27 @@ export default function HomePage() {
       try {
         if (typeof sdkAny.transaction?.getHistory === "function") {
           const h = await sdkAny.transaction.getHistory();
-          if (!cancelled && Array.isArray(h)) {
-            setTxHistory(normalizeHistory(h));
-            setHistoryError(null);
+          if (cancelled) return;
+          if (Array.isArray(h)) {
+            setRemoteTxHistory(normalizeHistory(h));
+          } else {
+            setRemoteTxHistory([]);
           }
           return;
         }
         if (typeof sdkAny.getRecentTransactions === "function") {
           const h = await sdkAny.getRecentTransactions();
-          if (!cancelled && Array.isArray(h)) {
-            setTxHistory(normalizeHistory(h));
-            setHistoryError(null);
+          if (cancelled) return;
+          if (Array.isArray(h)) {
+            setRemoteTxHistory(normalizeHistory(h));
+          } else {
+            setRemoteTxHistory([]);
           }
           return;
         }
-        if (!cancelled) {
-          setTxHistory([]);
-          setHistoryError("History API unavailable for this wallet/session.");
-        }
+        if (!cancelled) setRemoteTxHistory([]);
       } catch {
-        if (!cancelled) {
-          setTxHistory([]);
-          setHistoryError("Could not load transaction history.");
-        }
+        if (!cancelled) setRemoteTxHistory([]);
       }
     };
 
@@ -249,7 +332,7 @@ export default function HomePage() {
     };
   }, [walletReady, wallet, starkzap, txRefreshTick]);
 
-  const visibleTxHistory = walletReady && wallet ? txHistory : [];
+  const visibleTxHistory = mergeTxHistories(displayLocalTxHistory, displayRemoteTxHistory);
 
   const shortAddress =
     walletAddress && `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}`;
@@ -258,11 +341,11 @@ export default function HomePage() {
     if (!balancePreview) return undefined;
     return balancePreview.includes("BTC") ? balancePreview : `${balancePreview} (balance)`;
   }, [balancePreview]);
-  const portfolioValue = balances.USDC;
+  const portfolioValue = displayBalances.USDC;
 
   const handleTransactionComplete = useCallback(
     (payload: { hash: string; type: TxEntry["type"]; amountLabel: string }) => {
-      setTxHistory((prev) => [
+      setLocalTxHistory((prev) => [
         {
           hash: payload.hash,
           status: "success",
@@ -305,11 +388,16 @@ export default function HomePage() {
 
   const yieldPreview = useMemo(
     () => ({
-      usdcYear: balances.USDC * (FALLBACK_SUPPLY_APY.USDC / 100),
-      btcYear: balances.BTC * (FALLBACK_SUPPLY_APY.BTC / 100)
+      usdcYear: displayBalances.USDC * (FALLBACK_SUPPLY_APY.USDC / 100),
+      btcYear: displayBalances.BTC * (FALLBACK_SUPPLY_APY.BTC / 100)
     }),
-    [balances.USDC, balances.BTC]
+    [displayBalances.USDC, displayBalances.BTC]
   );
+
+  const handleLogout = () => {
+    setLocalTxHistory([]);
+    void logout();
+  };
 
   return (
     <main className="flex min-h-screen flex-col px-4 pb-12 pt-6 sm:px-6 lg:px-10 lg:pt-10">
@@ -393,7 +481,7 @@ export default function HomePage() {
           )}
 
           <button
-            onClick={authenticated ? () => logout() : () => login()}
+            onClick={authenticated ? () => handleLogout() : () => login()}
             disabled={!ready}
             className="btn-primary min-h-[44px] w-full shrink-0 justify-center sm:min-h-0 sm:w-auto"
           >
@@ -486,13 +574,23 @@ export default function HomePage() {
                   ${portfolioValue.toLocaleString()}
                 </p>
                 <p className="text-xs text-emerald-300">
-                  Backed by live USDC wallet balance
+                  Live Sepolia balances (WBTC, USDC, STRK) via your connected wallet
                 </p>
                 <div className="mt-2 space-y-1 text-[11px] text-slate-300">
                   <p>{formattedBalances.USDC}</p>
                   <p>{formattedBalances.BTC}</p>
                   <p>{formattedBalances.STRK}</p>
                 </div>
+                {walletReady && balanceReadIssue && (
+                  <div className="mt-3 flex gap-2 rounded-lg border border-slate-700/80 bg-slate-900/50 px-3 py-2 text-left">
+                    <Coins className="mt-0.5 h-4 w-4 shrink-0 text-amber-400/90" aria-hidden />
+                    <p className="text-[11px] leading-relaxed text-slate-400">
+                      We couldn&apos;t read token balances from the RPC yet (account may still be deploying). Balances
+                      usually appear after the wallet is fully ready—try refreshing in a moment or fund the address on
+                      Sepolia.
+                    </p>
+                  </div>
+                )}
               </div>
               <div className="rounded-xl border border-slate-800/70 bg-slate-950/70 px-4 py-3">
                 <p className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-slate-400">
@@ -516,7 +614,7 @@ export default function HomePage() {
             walletAddress={walletAddress ?? undefined}
             isConnected={walletReady}
             explorerBaseUrl={explorerBaseUrl}
-            balances={balances}
+            balances={displayBalances}
             privateMode={privateMode}
             onPrivateModeChange={setPrivateMode}
             onTransactionComplete={handleTransactionComplete}
@@ -525,7 +623,7 @@ export default function HomePage() {
             wallet={wallet}
             isConnected={walletReady}
             explorerBaseUrl={explorerBaseUrl}
-            balances={{ BTC: balances.BTC, USDC: balances.USDC }}
+            balances={{ BTC: displayBalances.BTC, USDC: displayBalances.USDC }}
             privateMode={privateMode}
             refreshKey={txRefreshTick}
             onTransactionComplete={handleTransactionComplete}
@@ -545,18 +643,22 @@ export default function HomePage() {
                 <p className="rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-6 text-center text-sm text-slate-500">
                   Connect your wallet to load history
                 </p>
-              ) : historyError ? (
-                <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-6 text-center text-sm text-amber-100">
-                  {historyError}
-                </p>
               ) : visibleTxHistory.length === 0 ? (
-                <p className="rounded-xl border border-slate-800/80 bg-slate-950/40 px-3 py-6 text-center text-sm text-slate-500">
-                  No transactions yet
-                </p>
+                <div className="flex flex-col items-center rounded-2xl border border-slate-800/90 bg-gradient-to-b from-slate-950/80 to-slate-900/40 px-5 py-10 text-center">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 ring-1 ring-primary/25">
+                    <History className="h-7 w-7 text-primary" aria-hidden />
+                  </div>
+                  <p className="mt-4 max-w-sm text-sm font-medium text-slate-200">
+                    No transactions yet. Your history will appear after your first DCA or Vesu deposit.
+                  </p>
+                  <p className="mt-2 max-w-sm text-xs leading-relaxed text-slate-500">
+                    On-chain activity from StarkZap will merge here when the history API is available for your session.
+                  </p>
+                </div>
               ) : (
-                visibleTxHistory.map((tx, i) => (
+                visibleTxHistory.map((tx) => (
                   <div
-                    key={i}
+                    key={tx.hash}
                     className="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-xs text-slate-300"
                   >
                     <div className="flex items-center justify-between gap-3">
