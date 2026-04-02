@@ -207,7 +207,8 @@ export default function HomePage() {
     walletStatusText,
     walletError,
     wallet,
-    connectStarkWallet
+    connectStarkWallet,
+    exportPrivateKey
   } = useStarkzapWallet(network);
   const { ready, authenticated, login, logout } = usePrivy();
   const [privateMode, setPrivateMode] = useState(true);
@@ -492,12 +493,25 @@ export default function HomePage() {
       </header>
 
       <section className="mx-auto mt-6 w-full max-w-6xl sm:mt-8">
-        <StarknetAddressCard
-          wallet={wallet}
-          walletReady={walletReady}
-          network={network}
-          explorerBaseUrl={explorerBaseUrl}
-        />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+          <div className="min-w-0 flex-1">
+            <StarknetAddressCard
+              wallet={wallet}
+              walletReady={walletReady}
+              network={network}
+              explorerBaseUrl={explorerBaseUrl}
+            />
+          </div>
+          {walletReady && !walletLoading && (
+            <button
+              type="button"
+              onClick={() => void exportPrivateKey()}
+              className="inline-flex shrink-0 items-center justify-center rounded-xl border border-amber-600/50 bg-amber-950/40 px-3 py-2 text-left text-xs font-semibold text-amber-100 shadow-sm transition hover:border-red-500/60 hover:bg-amber-950/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50 sm:max-w-[220px]"
+            >
+              ⚠️ Export Private Key (Backup)
+            </button>
+          )}
+        </div>
       </section>
 
       <section className="mx-auto mt-10 grid w-full max-w-6xl gap-8 lg:mt-14 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
