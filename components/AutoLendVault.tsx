@@ -155,7 +155,7 @@ export function AutoLendVault({
       toast.success("Deposited to Vesu (gasless)", {
         description: `~${activeApr.toFixed(2)}% supply APY on Sepolia${privateMode ? " · private routing preference saved" : ""}.`
       });
-      toast("View on Starkscan", {
+      toast("View on Voyager", {
         description: `${explorerBaseUrl}/tx/${hash}`,
         action: {
           label: "Open",
@@ -197,7 +197,7 @@ export function AutoLendVault({
       toast.success("Withdrawn from Vesu", {
         description: "Funds returned to your wallet."
       });
-      toast("View on Starkscan", {
+      toast("View on Voyager", {
         description: `${explorerBaseUrl}/tx/${hash}`,
         action: {
           label: "Open",

@@ -15,7 +15,7 @@ export type StarknetNetwork = "sepolia" | "mainnet";
 const sdkByNetwork: Partial<Record<StarknetNetwork, StarkZap>> = {};
 
 export function getExplorerBaseUrl(network: StarknetNetwork): string {
-  return network === "mainnet" ? "https://starkscan.co" : "https://sepolia.starkscan.co";
+  return network === "mainnet" ? "https://starkscan.co" : "https://sepolia.voyager.online";
 }
 
 function getStarkzap(network: StarknetNetwork): StarkZap {

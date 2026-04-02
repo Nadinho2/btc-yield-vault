@@ -107,7 +107,7 @@ export function DCAForm({
       });
 
       const explorerUrl = `${explorerBaseUrl}/tx/${hash}`;
-      toast("View on Starkscan", {
+      toast("View on Voyager", {
         description: explorerUrl,
         action: {
           label: "Open",
