@@ -14,6 +14,20 @@ export type StarknetNetwork = "sepolia" | "mainnet";
 
 const sdkByNetwork: Partial<Record<StarknetNetwork, StarkZap>> = {};
 
+/**
+ * Direct RPC fallback when not using the app proxy (SSR or NEXT_PUBLIC_STARKNET_RPC_DIRECT=true).
+ */
+const SEPOLIA_RPC_DEFAULT = "https://starknet-sepolia-rpc.publicnode.com";
+
+function sepoliaRpcUrlForRuntime(): string {
+  const envRpc = process.env.NEXT_PUBLIC_STARKNET_RPC_URL?.trim();
+  const forceDirect = process.env.NEXT_PUBLIC_STARKNET_RPC_DIRECT === "true";
+  if (typeof window !== "undefined" && !forceDirect) {
+    return `${window.location.origin}/api/starknet-rpc`;
+  }
+  return envRpc && envRpc.length > 0 ? envRpc : SEPOLIA_RPC_DEFAULT;
+}
+
 export function getExplorerBaseUrl(network: StarknetNetwork): string {
   return network === "mainnet" ? "https://starkscan.co" : "https://sepolia.voyager.online";
 }
@@ -21,8 +35,14 @@ export function getExplorerBaseUrl(network: StarknetNetwork): string {
 function getStarkzap(network: StarknetNetwork): StarkZap {
   if (!sdkByNetwork[network]) {
     const sponsoredEnabled = CARTRIDGE_PAYMASTER_NODE_URL.length > 0;
+    const envRpc = process.env.NEXT_PUBLIC_STARKNET_RPC_URL?.trim();
     const sdkConfig: SDKConfig & { gasless?: boolean } = {
       network,
+      ...(network === "sepolia"
+        ? { rpcUrl: sepoliaRpcUrlForRuntime() }
+        : envRpc && envRpc.length > 0
+          ? { rpcUrl: envRpc }
+          : {}),
       gasless: sponsoredEnabled
     };
     if (sponsoredEnabled) {
@@ -81,7 +101,6 @@ function extractStarknetPrivyWallet(user: PrivyUserLike | null | undefined) {
   for (const acc of accounts) {
     if (!acc || typeof acc !== "object") continue;
     const w = acc as LinkedWalletLike;
-    if (w.type !== "wallet") continue;
     const chain = String(w.chainType ?? w.chain_type ?? "").toLowerCase();
     if (chain !== "starknet") continue;
     const walletId = w.id ?? w.wallet_id;
@@ -255,24 +274,29 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
   const connectStarkWallet = useCallback(async () => {
     const currentUser = userRef.current;
     if (!privyReady || !authenticated || !currentUser) return;
+
     const existingWallet = walletRef.current;
     if (existingWallet && isFullStarkzapWallet(existingWallet)) return;
-    if (existingWallet && !isFullStarkzapWallet(existingWallet)) {
-      setWallet(null);
-      setBalancePreview(undefined);
-    }
+
     if (connectingRef.current) return;
+
     if (!appId) {
       setWalletError("Missing NEXT_PUBLIC_PRIVY_APP_ID");
       return;
     }
 
+    // Lock before any setState so Strict Mode / effect re-runs cannot start a second connect.
     connectingRef.current = true;
     setWalletLoading(true);
     setWalletStatusText("Setting up your Starknet wallet...");
     setWalletError(null);
 
     try {
+      if (existingWallet && !isFullStarkzapWallet(existingWallet)) {
+        setWallet(null);
+        setBalancePreview(undefined);
+      }
+
       const sdkWalletApi = sdk as unknown as StarkZapEmbeddedWalletApi;
       const createEmbeddedWallet = sdkWalletApi.wallet?.createEmbeddedWallet;
 
@@ -346,14 +370,20 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
       setBalancePreview(preview);
       setWalletStatusText(null);
     } catch (e) {
+      const raw = e instanceof Error ? e.message : String(e);
+      const fetchFailed =
+        raw === "Failed to fetch" || /failed to fetch/i.test(raw) || /networkerror/i.test(raw);
+      const message = fetchFailed
+        ? "Could not reach Starknet RPC. The app uses a same-origin proxy (/api/starknet-rpc). On Vercel, set STARKNET_RPC_URL or NEXT_PUBLIC_STARKNET_RPC_URL to a working Sepolia JSON-RPC URL, redeploy, and reload. For local debugging only, try NEXT_PUBLIC_STARKNET_RPC_DIRECT=true with NEXT_PUBLIC_STARKNET_RPC_URL."
+        : raw;
       console.error("[useStarkzap] wallet creation failed", e, {
         user: currentUser,
-        message: e instanceof Error ? e.message : String(e)
+        message: raw
       });
       setWallet(null);
       setBalancePreview(undefined);
       setWalletStatusText(null);
-      setWalletError(e instanceof Error ? e.message : "Failed to connect Starknet wallet");
+      setWalletError(message);
     } finally {
       setWalletLoading(false);
       connectingRef.current = false;
@@ -380,6 +410,7 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
   useEffect(() => {
     if (!privyReady) return;
     if (!authenticated) {
+      connectingRef.current = false;
       setWallet(null);
       setBalancePreview(undefined);
       setWalletStatusText(null);
@@ -387,12 +418,19 @@ export function useStarkzapWallet(network: StarknetNetwork): UseStarkzapWalletRe
       setWalletLoading(false);
       return;
     }
-    // Ref avoids effect loops when `connectStarkWallet` identity changes (Privy hooks).
-    // Re-run when the in-memory wallet is not a full StarkZap wallet (e.g. after upgrading from an older session).
     void connectStarkWalletRef.current();
-  }, [privyReady, authenticated, user?.id, linkedAccountsKey, network, wallet, walletOpsCapable]);
+  }, [privyReady, authenticated, user?.id, linkedAccountsKey, network]);
+
+  /** Replace a non-StarkZap handle (e.g. legacy embedded object) with a full wallet via onboard. */
+  useEffect(() => {
+    if (!privyReady || !authenticated) return;
+    if (wallet && !walletOpsCapable) {
+      void connectStarkWalletRef.current();
+    }
+  }, [privyReady, authenticated, wallet, walletOpsCapable]);
 
   useEffect(() => {
+    connectingRef.current = false;
     setWallet(null);
     setBalancePreview(undefined);
     setWalletError(null);

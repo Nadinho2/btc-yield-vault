@@ -23,6 +23,7 @@ import {
 import { toast } from "sonner";
 import { DCAForm } from "@/components/DCAForm";
 import { AutoLendVault } from "@/components/AutoLendVault";
+import { PrivyLoginPanel } from "@/components/PrivyLoginPanel";
 import { SendTokensCard } from "@/components/SendTokensCard";
 import { SwapTokensCard } from "@/components/SwapTokensCard";
 import { StarknetAddressCard } from "@/components/StarknetAddressCard";
@@ -217,7 +218,7 @@ export default function HomePage() {
     wallet,
     connectStarkWallet
   } = useStarkzapWallet(network);
-  const { ready, authenticated, login, logout } = usePrivy();
+  const { ready, authenticated, logout } = usePrivy();
   const [privateMode, setPrivateMode] = useState(true);
   const [balances, setBalances] = useState<WalletBalanceMap>({ BTC: 0, USDC: 0, STRK: 0 });
   const [balanceReadIssue, setBalanceReadIssue] = useState(false);
@@ -376,10 +377,14 @@ export default function HomePage() {
     howItWorksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const scrollToSignIn = () => {
+    document.getElementById("sign-in")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   const handlePrimaryAction = () => {
     if (!ready) return;
     if (!authenticated) {
-      login();
+      scrollToSignIn();
       return;
     }
     if (!walletReady) {
@@ -489,7 +494,13 @@ export default function HomePage() {
           )}
 
           <button
-            onClick={authenticated ? () => handleLogout() : () => login()}
+            onClick={
+              authenticated
+                ? () => handleLogout()
+                : () => {
+                    scrollToSignIn();
+                  }
+            }
             disabled={!ready}
             className="btn-primary min-h-[44px] w-full shrink-0 justify-center sm:min-h-0 sm:w-auto"
           >
@@ -517,8 +528,8 @@ export default function HomePage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Wallet &amp; recovery</p>
                 <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
-                  Your Starknet wallet is securely managed by Privy. You can always recover access by logging in with
-                  the same Google or Email account.
+                  Your Starknet session is managed by Privy. Recover access with the same Google, email, or linked
+                  external wallet (e.g. Braavos or Ready).
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-300">No seed phrase is needed.</p>
               </div>
@@ -548,13 +559,15 @@ export default function HomePage() {
               the scenes.
             </p>
 
+            <PrivyLoginPanel />
+
             <div className="mt-6 flex flex-wrap items-center gap-4">
               <button
                 onClick={handlePrimaryAction}
                 disabled={!ready}
                 className="btn-primary text-sm sm:text-base"
               >
-                {authenticated ? "Start earning yield" : "Connect to start"}
+                {authenticated ? "Start earning yield" : "Choose a sign-in method"}
                 <ArrowRight className="h-4 w-4" />
               </button>
 

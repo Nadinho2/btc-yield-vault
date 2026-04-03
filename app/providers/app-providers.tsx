@@ -4,6 +4,7 @@ import { ReactNode } from "react";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { Toaster } from "sonner";
 import { ReactQueryClientProvider } from "./react-query-client-provider";
+import { privyClientConfig } from "./privy-config";
 
 type Props = {
   children: ReactNode;
@@ -38,16 +39,7 @@ export function AppProviders({ children, privyAppId }: Props) {
   }
 
   return (
-    <PrivyProvider
-      appId={privyAppId}
-      config={{
-        loginMethods: ["google", "email"],
-        appearance: {
-          theme: "dark",
-          accentColor: "#7C3AED"
-        }
-      }}
-    >
+    <PrivyProvider appId={privyAppId} config={privyClientConfig}>
       <ReactQueryClientProvider>
         {children}
         <Toaster position="top-right" richColors />
