@@ -7,6 +7,9 @@ export const maxDuration = 25;
 
 const PROXY_UA = "btc-yield-vault-starknet-rpc-proxy/1.0";
 
+/** JSON-RPC internal error (starknet.js expects `error` to be an object with code/message, not a string). */
+const JSONRPC_INTERNAL = -32603;
+
 /** Server-side upstreams. CORS does not apply here. Env URLs are tried first, then public fallbacks. */
 function sepoliaUpstreamCandidates(): string[] {
   const fromEnv = [
@@ -25,25 +28,69 @@ function sepoliaUpstreamCandidates(): string[] {
   return [...new Set(merged)];
 }
 
-/** True if this looks like a JSON-RPC 2.0 error payload (HTTP 200 but RPC failed). */
-function jsonRpcResponseLooksOk(text: string): boolean {
+function readJsonRpcId(raw: string): string | number | null {
+  try {
+    const j = JSON.parse(raw) as { id?: unknown };
+    if (j && typeof j === "object" && "id" in j && j.id !== undefined) {
+      if (typeof j.id === "string" || typeof j.id === "number") return j.id;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * starknet.js does `const { error, result } = await response.json()` without checking HTTP status.
+ * `error` MUST be a JSON-RPC error object `{ code, message, data? }`, never a string, or RpcError shows "undefined: undefined: undefined".
+ */
+function jsonRpcProxyFailure(
+  id: string | number | null,
+  message: string,
+  data?: unknown
+): NextResponse {
+  return NextResponse.json(
+    {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: JSONRPC_INTERNAL,
+        message,
+        ...(data !== undefined ? { data } : {})
+      }
+    },
+    {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store"
+      }
+    }
+  );
+}
+
+/** Forward upstream JSON-RPC as-is, including RPC-level `error` (e.g. CONTRACT_NOT_FOUND for undeployed accounts). */
+function isJsonRpc2Body(text: string): boolean {
   try {
     const j = JSON.parse(text) as unknown;
     if (Array.isArray(j)) {
-      return j.every(
-        (item) =>
-          !item ||
-          typeof item !== "object" ||
-          !("error" in item) ||
-          (item as { error?: unknown }).error == null
+      return (
+        j.length > 0 &&
+        j.every(
+          (item) =>
+            item != null &&
+            typeof item === "object" &&
+            (item as { jsonrpc?: unknown }).jsonrpc === "2.0"
+        )
       );
     }
-    if (j && typeof j === "object" && "error" in j) {
-      return (j as { error?: unknown }).error == null;
-    }
-    return true;
+    return (
+      j != null &&
+      typeof j === "object" &&
+      (j as { jsonrpc?: unknown }).jsonrpc === "2.0"
+    );
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -67,8 +114,8 @@ async function fetchUpstream(
   if (!res.ok) {
     throw new Error(`upstream ${res.status}: ${text.slice(0, 200)}`);
   }
-  if (!jsonRpcResponseLooksOk(text)) {
-    throw new Error(`upstream json-rpc error: ${text.slice(0, 200)}`);
+  if (!isJsonRpc2Body(text)) {
+    throw new Error(`upstream returned non-jsonrpc body: ${text.slice(0, 200)}`);
   }
   return new NextResponse(text, {
     status: 200,
@@ -86,11 +133,12 @@ async function fetchUpstream(
  */
 export async function POST(request: Request) {
   const body = await request.text();
+  const rpcId = readJsonRpcId(body);
   const upstreams = sepoliaUpstreamCandidates();
   if (upstreams.length === 0) {
-    return NextResponse.json(
-      { error: "starknet_rpc_proxy_no_upstream", detail: "No RPC URLs configured" },
-      { status: 500 }
+    return jsonRpcProxyFailure(
+      rpcId,
+      "Starknet RPC proxy: no upstream URL configured. Set STARKNET_RPC_URL on the server."
     );
   }
 
@@ -121,12 +169,10 @@ export async function POST(request: Request) {
             .join(" | ")
         : String((e as Error)?.message ?? e);
 
-    return NextResponse.json(
-      {
-        error: "starknet_rpc_proxy_upstream_failed",
-        detail: reasons || "All Starknet Sepolia RPC upstreams failed"
-      },
-      { status: 502 }
+    return jsonRpcProxyFailure(
+      rpcId,
+      "Starknet RPC proxy: all upstreams failed",
+      { detail: reasons || "No Sepolia RPC responded in time" }
     );
   } finally {
     controllers.forEach((_, i) => clearTimeout(timers[i]));
