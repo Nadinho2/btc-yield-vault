@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { ArrowUpRight, CalendarClock, EyeOff, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Amount, type WalletInterface } from "starkzap";
-import { SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
+import { prepareAvnuDcaCreateCalls } from "@/lib/avnu-dca";
+import { humanAmountStringForToken, SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
+import { withSponsoredFeeFallback } from "@/lib/starkzap-fee";
 
 type TxPayload = {
   hash: string;
@@ -18,6 +20,7 @@ type Props = {
   isConnected: boolean;
   explorerBaseUrl: string;
   balances: Record<Asset, number>;
+  sponsoredFeesEnabled: boolean;
   privateMode: boolean;
   onPrivateModeChange: (value: boolean) => void;
   /** After confirmed on-chain success: refresh balances/history + local history row */
@@ -34,6 +37,7 @@ export function DCAForm({
   isConnected,
   explorerBaseUrl,
   balances,
+  sponsoredFeesEnabled,
   privateMode,
   onPrivateModeChange,
   onTransactionComplete
@@ -64,7 +68,7 @@ export function DCAForm({
     }
 
     const parsedAmount = Number(amount);
-    if (!parsedAmount || parsedAmount <= 0) {
+    if (!parsedAmount || parsedAmount <= 0 || !frequency) {
       toast.error("Enter a valid amount");
       return;
     }
@@ -77,22 +81,30 @@ export function DCAForm({
 
     const sellToken = asset === "USDC" ? SEPOLIA_USDC : SEPOLIA_WBTC;
     const buyToken = asset === "USDC" ? SEPOLIA_WBTC : SEPOLIA_USDC;
-    const frequencyIso = frequency === "weekly" ? "P1W" : "P1M";
 
     setIsCreating(true);
     try {
-      const sellAmount = Amount.parse(String(parsedAmount), sellToken);
-      const sellAmountPerCycle = Amount.parse(String(perExecution), sellToken);
+      const sellAmount = Amount.parse(humanAmountStringForToken(parsedAmount, sellToken), sellToken);
+      const perCycleStr = humanAmountStringForToken(perExecution, sellToken);
+      if (perCycleStr === "0" || Number(perCycleStr) <= 0) {
+        toast.error("Per-cycle amount too small", {
+          description: "Increase your budget or shorten the plan so each execution is large enough."
+        });
+        return;
+      }
+      const sellAmountPerCycle = Amount.parse(perCycleStr, sellToken);
 
-      const tx = await wallet.dca().create(
-        {
-          sellToken,
-          buyToken,
-          sellAmount,
-          sellAmountPerCycle,
-          frequency: frequencyIso
-        },
-        { feeMode: "sponsored" }
+      const calls = await prepareAvnuDcaCreateCalls({
+        sellToken,
+        buyToken,
+        sellAmount,
+        sellAmountPerCycle,
+        frequency,
+        traderAddress: walletAddress
+      });
+
+      const tx = await withSponsoredFeeFallback(sponsoredFeesEnabled, (feeMode) =>
+        wallet.execute(calls, { feeMode })
       );
 
       await tx.wait();
@@ -102,9 +114,10 @@ export function DCAForm({
         maximumFractionDigits: asset === "USDC" ? 2 : 6
       })} ${asset}`;
 
-      toast.success("DCA plan created (gasless)", {
-        description: `${duration} months · ${frequency} · ${amountLabel} total budget on Sepolia. ${privateMode ? "Private mode on." : ""}`
-      });
+      toast.success("DCA plan created successfully!");
+
+      // Parent bumps txRefreshTick → balances + remote history refetch (see page.tsx)
+      onTransactionComplete?.({ hash, type: "DCA", amountLabel });
 
       const explorerUrl = `${explorerBaseUrl}/tx/${hash}`;
       toast("View on Voyager", {
@@ -114,13 +127,15 @@ export function DCAForm({
           onClick: () => window.open(explorerUrl, "_blank", "noopener,noreferrer")
         }
       });
-
-      onTransactionComplete?.({ hash, type: "DCA", amountLabel });
-    } catch (error) {
-      console.error(error);
-      toast.error("Failed to create DCA plan", {
-        description: error instanceof Error ? error.message : "Please review your inputs and try again."
-      });
+    } catch (error: unknown) {
+      console.error("DCA creation failed", error);
+      const err = error as { message?: string };
+      const msg = typeof err?.message === "string" ? err.message : String(error ?? "");
+      if (msg.includes("AVNU") || msg.includes("undefined")) {
+        toast.error("DCA not available on testnet right now. Try again later or use smaller amount.");
+      } else {
+        toast.error("Failed to create DCA plan. Please try again.");
+      }
     } finally {
       setIsCreating(false);
     }
@@ -137,7 +152,8 @@ export function DCAForm({
             </p>
             <h3 className="mt-3 text-lg font-semibold text-white">DCA into BTC or stables</h3>
             <p className="mt-1 text-xs text-slate-300">
-              Uses <span className="font-medium text-slate-200">wallet.dca().create()</span> on StarkZap (gasless sponsored fees on Sepolia).
+              AVNU DCA calls prepared for Sepolia, executed via StarkZap{" "}
+              <span className="font-medium text-slate-200">wallet.execute</span> (gasless when the paymaster accepts).
             </p>
           </div>
         </div>
@@ -268,7 +284,7 @@ export function DCAForm({
           {isCreating ? (
             <>
               <Loader2 className="h-4 w-4 animate-spin" />
-              Confirming on Sepolia…
+              Creating DCA plan…
             </>
           ) : (
             <>

@@ -1,25 +1,19 @@
 "use client";
 
-import { useState } from "react";
 import { Loader2, Mail } from "lucide-react";
 import { usePrivy, useLoginWithOAuth } from "@privy-io/react-auth";
-import type { WalletListEntry } from "@privy-io/react-auth";
 import { toast } from "sonner";
 
-/** Privy Starknet wallet list ids — enable in the Privy dashboard if missing. */
-const starknetWallet = (id: string) => id as WalletListEntry;
-
 export function PrivyLoginPanel() {
-  const { ready, authenticated, login, connectWallet } = usePrivy();
+  const { ready, authenticated, login } = usePrivy();
   const { initOAuth, loading: oauthLoading } = useLoginWithOAuth();
-  const [walletOpening, setWalletOpening] = useState<null | "braavos" | "argent">(null);
 
   if (!ready || authenticated) return null;
 
   const onError = (label: string, err: unknown) => {
     console.error(`[PrivyLoginPanel] ${label}`, err);
     toast.error(`${label} failed`, {
-      description: err instanceof Error ? err.message : "Try again or use another method."
+      description: err instanceof Error ? err.message : "Try again."
     });
   };
 
@@ -30,7 +24,7 @@ export function PrivyLoginPanel() {
     >
       <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Sign in</p>
       <p className="mt-1 text-sm text-slate-400">
-        Use a Starknet browser wallet (recommended) or sign in with Google or email.
+        Sign in with Google or email. Your Starknet wallet is created right after you log in.
       </p>
       <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
         <button
@@ -53,63 +47,9 @@ export function PrivyLoginPanel() {
           <Mail className="h-4 w-4 text-primary" aria-hidden />
           Continue with Email
         </button>
-
-        <button
-          type="button"
-          disabled={walletOpening !== null}
-          onClick={() => {
-            setWalletOpening("braavos");
-            try {
-              connectWallet({
-                walletList: [starknetWallet("braavos")],
-                description: "Connect Braavos on Starknet"
-              });
-            } catch (e) {
-              onError("Braavos", e);
-            } finally {
-              setTimeout(() => setWalletOpening(null), 800);
-            }
-          }}
-          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-sky-500/35 bg-sky-500/10 px-4 py-2.5 text-sm font-semibold text-sky-100 transition hover:border-sky-400/60 hover:bg-sky-500/15 disabled:opacity-60"
-        >
-          {walletOpening === "braavos" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Connect with Braavos
-        </button>
-
-        <button
-          type="button"
-          disabled={walletOpening !== null}
-          onClick={() => {
-            setWalletOpening("argent");
-            try {
-              connectWallet({
-                walletList: [starknetWallet("argent")],
-                description: "Connect Ready Wallet (Argent) on Starknet"
-              });
-            } catch (e) {
-              onError("Ready Wallet", e);
-            } finally {
-              setTimeout(() => setWalletOpening(null), 800);
-            }
-          }}
-          className="flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-violet-500/35 bg-violet-500/10 px-4 py-2.5 text-sm font-semibold text-violet-100 transition hover:border-violet-400/60 hover:bg-violet-500/15 disabled:opacity-60"
-        >
-          {walletOpening === "argent" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Connect with Ready Wallet
-        </button>
       </div>
       <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
-        WalletConnect is available from the Privy modal when you pick other connection options. Enable Starknet + Braavos
-        / Argent in your{" "}
-        <a
-          href="https://dashboard.privy.io"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-slate-400 underline decoration-slate-600 underline-offset-2 hover:text-slate-300"
-        >
-          Privy dashboard
-        </a>{" "}
-        if a method is missing.
+        After login, the app connects your Starknet wallet automatically (about 10–25 seconds the first time).
       </p>
     </div>
   );

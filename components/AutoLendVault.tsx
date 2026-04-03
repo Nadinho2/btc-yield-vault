@@ -5,6 +5,7 @@ import { Coins, Loader2, TrendingUp, Wallet2 } from "lucide-react";
 import { toast } from "sonner";
 import { Amount, type WalletInterface } from "starkzap";
 import { FALLBACK_SUPPLY_APY, SEPOLIA_USDC, SEPOLIA_WBTC } from "@/lib/starkzap-sepolia";
+import { withSponsoredFeeFallback } from "@/lib/starkzap-fee";
 
 type DepositAsset = "BTC" | "USDC";
 
@@ -22,6 +23,7 @@ type Props = {
     BTC: number;
     USDC: number;
   };
+  sponsoredFeesEnabled: boolean;
   privateMode: boolean;
   onTransactionComplete?: (payload: TxPayload) => void;
   /** Bump after any tx so we refetch Vesu positions & markets */
@@ -40,6 +42,7 @@ export function AutoLendVault({
   isConnected,
   explorerBaseUrl,
   balances,
+  sponsoredFeesEnabled,
   privateMode,
   onTransactionComplete,
   refreshKey
@@ -137,12 +140,14 @@ export function AutoLendVault({
     setIsDepositing(true);
     try {
       const amount = Amount.parse(String(parsedDeposit), token);
-      const tx = await wallet.lending().deposit(
-        {
-          token,
-          amount
-        },
-        { feeMode: "sponsored" }
+      const tx = await withSponsoredFeeFallback(sponsoredFeesEnabled, (feeMode) =>
+        wallet.lending().deposit(
+          {
+            token,
+            amount
+          },
+          { feeMode }
+        )
       );
       await tx.wait();
 
@@ -152,8 +157,8 @@ export function AutoLendVault({
         maximumFractionDigits: depositAsset === "BTC" ? 6 : 2
       })} ${unit}`;
 
-      toast.success("Deposited to Vesu (gasless)", {
-        description: `~${activeApr.toFixed(2)}% supply APY on Sepolia${privateMode ? " · private routing preference saved" : ""}.`
+      toast.success("Deposited to Vesu", {
+        description: `~${activeApr.toFixed(2)}% supply APY on Sepolia.${sponsoredFeesEnabled ? " Gasless when the paymaster accepts the tx." : ""}${privateMode ? " Private routing preference saved." : ""}`
       });
       toast("View on Voyager", {
         description: `${explorerBaseUrl}/tx/${hash}`,
@@ -185,12 +190,14 @@ export function AutoLendVault({
     const t = asset === "BTC" ? SEPOLIA_WBTC : SEPOLIA_USDC;
     setIsWithdrawing(true);
     try {
-      const tx = await wallet.lending().withdraw(
-        {
-          token: t,
-          amount: Amount.parse(String(amt), t)
-        },
-        { feeMode: "sponsored" }
+      const tx = await withSponsoredFeeFallback(sponsoredFeesEnabled, (feeMode) =>
+        wallet.lending().withdraw(
+          {
+            token: t,
+            amount: Amount.parse(String(amt), t)
+          },
+          { feeMode }
+        )
       );
       await tx.wait();
       const hash = tx.hash;

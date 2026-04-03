@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@avnu/avnu-sdk": "4.1.0-rc.0",
     "@farcaster/mini-app-solana": "^1.1.3",
     "@farcaster/miniapp-sdk": "^0.2.3",
     "@fatsolutions/tongo-sdk": "^1.3.2",
@@ -24,6 +25,7 @@
     "@tanstack/react-query": "^5.51.21",
     "ethers": "^6.16.0",
     "lucide-react": "^0.453.0",
+    "moment": "^2.30.1",
     "next": "^16.2.2",
     "react": "19.0.0-rc-187dd6a7-20240806",
     "react-dom": "19.0.0-rc-187dd6a7-20240806",

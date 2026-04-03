@@ -4,6 +4,7 @@ import { ReactNode } from "react";
 import { PrivyProvider } from "@privy-io/react-auth";
 import { Toaster } from "sonner";
 import { ReactQueryClientProvider } from "./react-query-client-provider";
+import { WarmStarknetRpcProxy } from "@/components/WarmStarknetRpcProxy";
 import { privyClientConfig } from "./privy-config";
 
 type Props = {
@@ -40,6 +41,7 @@ export function AppProviders({ children, privyAppId }: Props) {
 
   return (
     <PrivyProvider appId={privyAppId} config={privyClientConfig}>
+      <WarmStarknetRpcProxy />
       <ReactQueryClientProvider>
         {children}
         <Toaster position="top-right" richColors />

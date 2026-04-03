@@ -528,8 +528,8 @@ export default function HomePage() {
               <div className="min-w-0">
                 <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Wallet &amp; recovery</p>
                 <p className="mt-1.5 text-sm leading-relaxed text-slate-400">
-                  Your Starknet session is managed by Privy. Recover access with the same Google, email, or linked
-                  external wallet (e.g. Braavos or Ready).
+                  Your Starknet session is managed by Privy after you sign in with Google or email. Recover access with
+                  the same method you used to sign up.
                 </p>
                 <p className="mt-2 text-sm font-medium text-slate-300">No seed phrase is needed.</p>
               </div>
@@ -655,6 +655,7 @@ export default function HomePage() {
             isConnected={walletReady}
             explorerBaseUrl={explorerBaseUrl}
             balances={displayBalances}
+            sponsoredFeesEnabled={sponsoredFeesEnabled}
             privateMode={privateMode}
             onPrivateModeChange={setPrivateMode}
             onTransactionComplete={handleTransactionComplete}
@@ -664,6 +665,7 @@ export default function HomePage() {
             isConnected={walletReady}
             explorerBaseUrl={explorerBaseUrl}
             balances={{ BTC: displayBalances.BTC, USDC: displayBalances.USDC }}
+            sponsoredFeesEnabled={sponsoredFeesEnabled}
             privateMode={privateMode}
             refreshKey={txRefreshTick}
             onTransactionComplete={handleTransactionComplete}
@@ -818,8 +820,8 @@ export default function HomePage() {
                 <p className="mt-4 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Step 1</p>
                 <p className="mt-1 text-base font-semibold text-white">Connect in seconds</p>
                 <p className="mt-2 text-sm leading-relaxed text-slate-400">
-                  Sign in with Google or email. Privy creates a Starknet embedded wallet, provisioned gasless via{" "}
-                  <span className="text-slate-300">Cartridge</span> on Sepolia.
+                  Sign in with Google or email. Privy secures your session; StarkZap provisions your Starknet embedded
+                  wallet, gasless via <span className="text-slate-300">Cartridge</span> on Sepolia when configured.
                 </p>
               </div>
 
